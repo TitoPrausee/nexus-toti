@@ -1,33 +1,103 @@
-# NEXUS Toti Agent System Configuration v2.0
-# Mit Error-Learning, LLM-Health, 22 Tools, 10 Skills
+# NEXUS Toti Agent System Configuration v3.0
+# Ollama Cloud Integration · Per-Agent Model Routing · Error Learning
 
-# Ollama Model Configuration
+# ═══════════════════════════════════════════════════════════
+# OLLAMA CLOUD CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+ollama:
+  # API Configuration
+  base_url: "https://api.ollama.ai"    # Ollama Cloud API
+  local_url: "http://localhost:11434"   # Lokaler Ollama Server
+  api_key: ""                           # OLLAMA_API_KEY env var oder hier eintragen
+  mode: "cloud"                         # "cloud" | "local" | "hybrid" (cloud优先, local fallback)
+
+  # Per-Agent Modell-Zuordnung — Optimal für Ollama Cloud
+  agent_models:
+    NEXUS-0:
+      model: "kimi-k2.6:cloud"
+      description: "Orchestrator — Beste Balance für agentisches Coding, 87/100 Tier-A"
+      pull_cmd: "ollama pull kimi-k2.6:cloud"
+      temperature: 0.7
+      max_tokens: 4096
+
+    SCOUT:
+      model: "glm-5.1:cloud"
+      description: "Recherche — 744B Parameter, optimiert für Systems Engineering"
+      pull_cmd: "ollama pull glm-5.1:cloud"
+      temperature: 0.5
+      max_tokens: 8192
+
+    FORGE:
+      model: "qwen3-coder-next:cloud"
+      description: "Coding — Bestes Coding-Modell im Ollama-Ökosystem"
+      pull_cmd: "ollama pull qwen3-coder-next:cloud"
+      temperature: 0.3
+      max_tokens: 8192
+
+    LENS:
+      model: "kimi-k2.6:cloud"
+      description: "Analyse — Herausragend bei Research und Reasoning"
+      pull_cmd: "ollama pull kimi-k2.6:cloud"
+      temperature: 0.4
+      max_tokens: 4096
+
+    HERALD:
+      model: "minimax-m2.7:cloud"
+      description: "Output — Stark bei langen, stabilen Sessions"
+      pull_cmd: "ollama pull minimax-m2.7:cloud"
+      temperature: 0.6
+      max_tokens: 4096
+
+    GHOST:
+      model: "deepseek-v4-flash:cloud"
+      description: "Background — Günstigster Cloud-Slot, reicht für Monitoring"
+      pull_cmd: "ollama pull deepseek-v4-flash:cloud"
+      temperature: 0.3
+      max_tokens: 2048
+
+  # Fallback-Modelle (wenn Cloud nicht verfügbar)
+  fallback_models:
+    cloud: "glm-5.1:cloud"             # Universal-Fallback Cloud
+    local: "llama3.2:latest"           # Universal-Fallback Local
+    zai: "glm-4-plus"                  # z-ai CLI Fallback
+
+  # Health & Auto-Verify
+  health_check_on_start: true          # Modelle beim Start testen
+  verify_response: true                # Teste dass Modelle tatsächlich antworten
+  auto_fallback: true                  # Automatisch auf Fallback wechseln
+  max_retries: 2                       # Max Retry pro Call
+
+# ═══════════════════════════════════════════════════════════
+# LEGACY GLM CONFIGURATION (z-ai CLI Fallback)
+# ═══════════════════════════════════════════════════════════
 model:
-  default_level: 2  # 0=rules, 1=fast, 2=standard, 3=thinking
+  default_level: 2                     # 0=rules, 1=fast, 2=standard, 3=thinking
   max_retries: 2
   auto_fallback: true
-  health_check_on_start: true
-  # Modell via Env-Var ueberschreibbar: NEXUS_MODEL_STANDARD=qwen2.5:7b
-  ollama_model: "qwen2.5:3b"
-  ollama_host: "http://localhost:11434"
 
-# Toti Agent
+# ═══════════════════════════════════════════════════════════
+# TOTI AGENT
+# ═══════════════════════════════════════════════════════════
 toti:
   personality_active: true
   max_steps: 10
-  confidence_threshold: 0.5  # Below this → ask user
-  error_learning: true  # Selbst-Fehlererkennung aktiv
-  auto_avoid: true  # Bekannte Fehler automatisch vermeiden
+  confidence_threshold: 0.5
+  error_learning: true
+  auto_avoid: true
 
-# Memory
+# ═══════════════════════════════════════════════════════════
+# MEMORY
+# ═══════════════════════════════════════════════════════════
 memory:
   base_dir: "memory"
   max_session_history: 100
   auto_save: true
-  rolling_summary_max: 300  # chars
-  last_output_max: 200  # chars
+  rolling_summary_max: 300
+  last_output_max: 200
 
-# Smart Scheduler
+# ═══════════════════════════════════════════════════════════
+# SMART SCHEDULER
+# ═══════════════════════════════════════════════════════════
 scheduler:
   enabled: true
   default_tasks:
@@ -44,57 +114,63 @@ scheduler:
       trigger: CHANGE_TRIGGER
       watch: "data/state/"
 
-# Safety Guards
+# ═══════════════════════════════════════════════════════════
+# SAFETY GUARDS
+# ═══════════════════════════════════════════════════════════
 guards:
   max_steps: 10
   budget_limit_pct: 90.0
   loop_detection_window: 3
   action_loop_window: 5
 
-# Error Learning
+# ═══════════════════════════════════════════════════════════
+# ERROR LEARNING
+# ═══════════════════════════════════════════════════════════
 error_learning:
   enabled: true
-  max_error_age_days: 7  # Alte Fehler nach X Tagen löschen
+  max_error_age_days: 7
   auto_consolidate: true
-  similarity_threshold: 0.3  # Ab wann ist ein Fehler "ähnlich"
+  similarity_threshold: 0.3
 
-# Sub-Agents
+# ═══════════════════════════════════════════════════════════
+# SUB-AGENTS (vereinfacht — Modelle aus ollama.agent_models)
+# ═══════════════════════════════════════════════════════════
 agents:
   SCOUT:
-    model_level: 1
-    min_sources: 2
     skills: [web_research, data_extract]
   FORGE:
-    model_level: 2
     test_before_done: true
     skills: [code_debug, code_review, test_gen, doc_gen]
   LENS:
-    model_level: 2
     pareto_threshold: 0.2
     skills: [code_review, security_scan, performance, dependency_check]
   HERALD:
-    model_level: 1
     skills: [doc_gen]
   GHOST:
-    model_level: 0  # Always local
     stuck_threshold: 3
     pattern_threshold: 3
     skills: [deploy_prep, dependency_check]
 
-# Tools Configuration (22 Tools)
+# ═══════════════════════════════════════════════════════════
+# TOOLS (22 Tools)
+# ═══════════════════════════════════════════════════════════
 tools:
   base: [terminal, read_file, write_file, web_search, list_dir, code_exec]
   developer: [git, docker, pkg_install, http_request, file_search, process_manager, env_check, port_check, json_yaml, file_ops]
   advanced: [db_query, api_test, code_lint, archive_ops, csv_ops, scheduler_tool]
-  dangerous_requires_confirmation: false  # Toti handelt autonom
+  dangerous_requires_confirmation: false
 
-# Telegram
+# ═══════════════════════════════════════════════════════════
+# TELEGRAM
+# ═══════════════════════════════════════════════════════════
 telegram:
   enabled: false
-  token: ""  # NEXUS_TG_TOKEN env var
+  token: ""
   authorized_users: []
 
+# ═══════════════════════════════════════════════════════════
 # CLI
+# ═══════════════════════════════════════════════════════════
 cli:
   rich_output: true
   prompt: "Toti >"

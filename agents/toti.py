@@ -1,7 +1,7 @@
 """
-TOTI — Primärer autonomer Agent im Nexus-System v2.0
+TOTI — Primärer autonomer Agent im Nexus-System v3.0
+Ollama Cloud Routing, Error-Learning, Skill-Integration.
 Orchestriert, delegiert, entscheidet autonom, antwortet sofort.
-Mit Error-Learning, LLM-Health-Check und Skill-Integration.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ from typing import Optional
 from pathlib import Path
 
 from core.agent_base import AgentBase
-from core.llm_client import LLMClient, Message
+from core.llm_client import LLMClient, Message, DEFAULT_AGENT_MODELS
 from core.memory import MemorySystem
 from core.tools import ToolRegistry
 from core.state import StateManager
@@ -23,7 +23,7 @@ from core.error_learning import ErrorLearningSystem
 class TotiAgent(AgentBase):
     """TOTI — Primär-Agent. Handelt autonom, antwortet sofort, delegiert intelligent, lernt aus Fehlern."""
 
-    AGENT_ID = "TOTI"
+    AGENT_ID = "NEXUS-0"
     AGENT_NAME = "Toti"
     SYSTEM_PROMPT_FILE = "toti.txt"
 
@@ -47,7 +47,7 @@ class TotiAgent(AgentBase):
         if user_input.startswith("/"):
             return self._handle_command(user_input)
 
-        # Konversation oder technischer Task?
+        # Konversation direkt von Toti beantworten — nie delegieren
         if self._is_conversational(user_input):
             return self.quick_response(user_input)
 
@@ -92,7 +92,6 @@ class TotiAgent(AgentBase):
     def _is_conversational(self, task: str) -> bool:
         """Erkenne Konversation vs. technischen Task."""
         task_lower = task.strip().lower()
-
         conversational_patterns = [
             "hi", "hallo", "hey", "hello", "moin", "servus",
             "wer bist du", "wer bist", "wie heißt du", "wie heisst du",
@@ -105,11 +104,8 @@ class TotiAgent(AgentBase):
             "explain", "what is", "who are", "tell me about",
             "how are", "how do you",
         ]
-
-        # Exakt kurze Nachrichten (<=3 Wörter) immer als Konversation
         if len(task.split()) <= 3:
             return True
-
         return any(task_lower.startswith(p) or task_lower == p for p in conversational_patterns)
 
     def _pick_agent(self, task: str) -> str:
@@ -164,19 +160,40 @@ class TotiAgent(AgentBase):
             scheduler_status = self._get_scheduler_status()
             error_stats = self.error_learning.get_error_stats()
             health = self.llm.get_health_status()
+            backend_info = health.get("_backend", {})
+
+            # Agent-Modell-Status
+            agent_lines = []
+            for agent_id, h in health.items():
+                if agent_id.startswith("_"):
+                    continue
+                model = h.get("model", "?")
+                ok = h.get("available", False)
+                backend = h.get("backend", "?")
+                rt = h.get("response_time", "n/a")
+                status = "✓" if ok else "✗"
+                agent_lines.append(f"  {status} {agent_id:<10} {model:<28} {backend} ({rt})")
+
             return (
-                f"**Toti Status v2.0**\n"
+                f"**Toti Status v3.0 — Ollama Cloud**\n"
                 f"State: {self.state.get('current_task.status', 'idle')}\n"
                 f"Task: {self.state.get('current_task.goal', 'none')}\n"
                 f"Step: {guards['steps']}/{guards['max_steps']}\n"
-                f"Budget: {guards['budget_used_pct']}% | Fallback: {guards['cloud_fallback']}\n"
+                f"Budget: {guards['budget_used_pct']}%\n"
+                f"Active Backend: {backend_info.get('active', '?')}\n"
+                f"Cloud: {'✓' if backend_info.get('cloud') else '✗'} | "
+                f"Local: {'✓' if backend_info.get('local') else '✗'} | "
+                f"z-ai: {'✓' if backend_info.get('zai_cli') else '✗'} | "
+                f"API Key: {'gesetzt' if backend_info.get('api_key_set') else 'FEHLT'}\n"
                 f"LLM Calls: {llm_stats['total_calls']} | Tokens: {llm_stats['total_tokens']}\n"
-                f"Ollama: {'✓' if llm_stats.get('ollama_available', llm_stats.get('cli_available', False)) else '✗'} | Host: {llm_stats.get('ollama_host', llm_stats.get('cli_path', 'n/a'))}\n"
-                f"Models: {json.dumps({k: '✓' if v else '✗' for k, v in health.get('health', {}).items()})}\n"
+                f"\nAgent-Modelle:\n" + "\n".join(agent_lines) + "\n"
                 f"Agents: {len(self.delegation._agents)} | Scheduler: {scheduler_status}\n"
                 f"Errors: {error_stats['total_unique_errors']} known | {error_stats['session_avoided']} avoided\n"
                 f"Tools: {len(self.tools.list_tools())} | Skills: {len(self._get_available_skills())}"
             )
+
+        elif cmd == "/models":
+            return self.llm.get_model_table()
 
         elif cmd == "/memory":
             skills = self.memory.skill_list()
@@ -211,12 +228,18 @@ class TotiAgent(AgentBase):
 
         elif cmd == "/health":
             health = self.llm.run_health_check()
-            lines = ["**LLM Health Check**"]
-            for level, h in health.items():
-                model_name = self.llm.MODEL_LEVELS.get(level, {}).get("name", f"Level {level}")
-                status = "✓ OK" if h.available else f"✗ {h.error}"
+            lines = ["**LLM Health Check — Ollama Cloud**"]
+            for agent_id, h in health.items():
+                if agent_id.startswith("_"):
+                    continue
+                status = "✓ OK" if h.available else f"✗ {h.error[:50]}"
                 rt = f"{h.response_time:.1f}s" if h.response_time else "n/a"
-                lines.append(f"  {model_name}: {status} ({rt})")
+                lines.append(f"  {agent_id:<10} {h.model_name:<28} {h.backend:<14} {status} ({rt})")
+            backend = self.llm.get_health_status().get("_backend", {})
+            lines.append(f"\n  Backend: {backend.get('active', '?')} | "
+                        f"Cloud: {'✓' if backend.get('cloud') else '✗'} | "
+                        f"Local: {'✓' if backend.get('local') else '✗'} | "
+                        f"z-ai: {'✓' if backend.get('zai_cli') else '✗'}")
             return "\n".join(lines)
 
         elif cmd == "/tools":
@@ -253,18 +276,26 @@ class TotiAgent(AgentBase):
 
         elif cmd == "/help":
             return (
-                "**Toti Commands v2.0**\n"
-                "/status — System-Status (Guards, Budget, LLM, Errors)\n"
-                "/memory — Memory-Übersicht (L1/L2/L3)\n"
-                "/state — State-Objekt anzeigen\n"
-                "/errors — Error-Learning Statistiken\n"
-                "/health — LLM-Modelle Health-Check\n"
-                "/tools — Verfügbare Tools auflisten\n"
-                "/skills — Verfügbare Skills auflisten\n"
-                "/reset — Session + State zurücksetzen\n"
+                "**Toti Commands v3.0 — Ollama Cloud**\n"
+                "/status  — System-Status (Backend, Modelle, Guards, Errors)\n"
+                "/models  — Ollama Cloud Modell-Zuordnung anzeigen\n"
+                "/memory  — Memory-Übersicht (L1/L2/L3)\n"
+                "/state   — State-Objekt anzeigen\n"
+                "/errors  — Error-Learning Statistiken\n"
+                "/health  — LLM-Modelle Health-Check\n"
+                "/tools   — Verfügbare Tools auflisten\n"
+                "/skills  — Verfügbare Skills auflisten\n"
+                "/reset   — Session + State zurücksetzen\n"
                 "/evolve <task> — GEPA Self-Improvement\n"
-                "/help — Diese Hilfe\n\n"
-                "Oder einfach schreiben. Toti handelt."
+                "/help    — Diese Hilfe\n\n"
+                "Oder einfach schreiben. Toti handelt.\n\n"
+                "Modell-Routing:\n"
+                "  NEXUS-0  → kimi-k2.6:cloud\n"
+                "  SCOUT    → glm-5.1:cloud\n"
+                "  FORGE    → qwen3-coder-next:cloud\n"
+                "  LENS     → kimi-k2.6:cloud\n"
+                "  HERALD   → minimax-m2.7:cloud\n"
+                "  GHOST    → deepseek-v4-flash:cloud"
             )
 
         return f"Unbekannt: {command}. /help für verfügbare Befehle."
@@ -283,7 +314,7 @@ class TotiAgent(AgentBase):
         error_stats = self.error_learning.get_error_stats()
         hints = self.error_learning.generate_avoid_hints()
 
-        evolve_prompt = f"""GEPA SELF-IMPROVEMENT PROTOCOL v2.0
+        evolve_prompt = f"""GEPA SELF-IMPROVEMENT PROTOCOL v3.0
 
 Task: {task_name or 'General session review'}
 
@@ -324,7 +355,7 @@ Konkret und ehrlich. Kein Fülltext."""
             Message(role="user", content=evolve_prompt),
         ]
 
-        response = self.llm.chat(messages, level=2)
+        response = self.llm.chat(messages, agent_id=self.AGENT_ID)
         self.memory.longterm_write(
             f"gepa_{task_name or 'general'}",
             {"analysis": response.content[:2000], "timestamp": time.time()},

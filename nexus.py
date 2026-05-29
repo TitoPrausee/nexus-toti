@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
 """
-NEXUS — Toti Agent System v2.0
-Powered by GLM (z-ai) · Hermes-inspired Architecture · Error Learning · 22 Tools · 10 Skills
+NEXUS — Toti Agent System v3.0
+Ollama Cloud · Per-Agent Model Routing · Error Learning · 22 Tools · 10 Skills
+
+Agent-Team:
+  NEXUS-0 (Orchestrator) → kimi-k2.6:cloud
+  SCOUT  (Recherche)     → glm-5.1:cloud
+  FORGE  (Code)          → qwen3-coder-next:cloud
+  LENS   (Analyse)       → kimi-k2.6:cloud
+  HERALD (Output)        → minimax-m2.7:cloud
+  GHOST  (Background)    → deepseek-v4-flash:cloud
 
 Usage:
-  python nexus.py                    # Interactive CLI
-  python nexus.py --task "..."       # Single task
-  python nexus.py --telegram         # Telegram bot
-  python nexus.py --session ID       # Resume session
-  python nexus.py --health           # LLM health check only
+  python nexus.py                          # Interactive CLI
+  python nexus.py --task "..."             # Single task
+  python nexus.py --telegram               # Telegram bot
+  python nexus.py --session ID             # Resume session
+  python nexus.py --health                 # LLM health check
+  python nexus.py --models                 # Show model table
+  python nexus.py --setup                  # Ollama Cloud Setup
+  python nexus.py --setup --api-key KEY    # API Key setzen
 """
 
 import sys
@@ -20,39 +31,76 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NEXUS Toti Agent System v2.0")
+    parser = argparse.ArgumentParser(description="NEXUS Toti Agent System v3.0 — Ollama Cloud")
     parser.add_argument("--task", "-t", help="Single task (non-interactive)", type=str)
     parser.add_argument("--telegram", help="Start Telegram bot", action="store_true")
     parser.add_argument("--telegram-token", help="Telegram bot token", type=str)
     parser.add_argument("--telegram-users", help="Authorized user IDs (comma-separated)", type=str)
     parser.add_argument("--session", "-s", help="Resume session by ID", type=str)
-    parser.add_argument("--model", help="GLM model (default: glm-4-plus)", default="glm-4-plus")
+    parser.add_argument("--model", help="Override default model", default=None)
     parser.add_argument("--thinking", help="Enable chain-of-thought", action="store_true")
     parser.add_argument("--max-steps", help="Max steps per task (default: 10)", type=int, default=10)
     parser.add_argument("--health", help="Run LLM health check and exit", action="store_true")
+    parser.add_argument("--models", help="Show model routing table", action="store_true")
+    parser.add_argument("--setup", help="Run Ollama Cloud setup", action="store_true")
+    parser.add_argument("--api-key", help="Ollama Cloud API Key (for --setup)", type=str)
+    parser.add_argument("--test-models", help="Test all models and exit", action="store_true")
     parser.add_argument("--version", "-v", help="Show version", action="store_true")
 
     args = parser.parse_args()
 
     if args.version:
-        print("NEXUS Toti Agent System v2.0")
-        print("22 Tools · 10 Skills · Error Learning · GLM Powered")
+        print("NEXUS Toti Agent System v3.0")
+        print("Ollama Cloud · 6 Agent-Modelle · Error Learning · 22 Tools · 10 Skills")
+        print()
+        print("Agent-Team:")
+        print("  NEXUS-0  → kimi-k2.6:cloud       (Orchestrator)")
+        print("  SCOUT    → glm-5.1:cloud          (Recherche)")
+        print("  FORGE    → qwen3-coder-next:cloud (Coding)")
+        print("  LENS     → kimi-k2.6:cloud        (Analyse)")
+        print("  HERALD   → minimax-m2.7:cloud      (Output)")
+        print("  GHOST    → deepseek-v4-flash:cloud (Background)")
         return
 
-    # ─── Health Check Only ───
+    # ─── Ollama Setup ───
+    if args.setup:
+        from ollama_setup import OllamaSetup
+        setup = OllamaSetup()
+        if args.api_key:
+            setup.run_api_key_setup(args.api_key)
+        else:
+            setup.run_interactive()
+        return
+
+    # ─── Model Table ───
+    if args.models:
+        from core.llm_client import LLMClient
+        llm = LLMClient()
+        print(llm.get_model_table())
+        return
+
+    # ─── Health Check ───
     if args.health:
         from core.llm_client import LLMClient
         llm = LLMClient()
-        print("NEXUS LLM Health Check v2.0")
-        print("=" * 40)
-        health = llm.run_health_check()
-        for level, h in health.items():
-            status = "✓ OK" if h.available else f"✗ {h.error}"
-            rt = f"{h.response_time:.1f}s" if h.response_time else "n/a"
-            print(f"  Level {level} ({h.model_name}): {status} ({rt})")
-        stats = llm.get_stats()
-        print(f"\nOllama Available: {'Yes' if stats.get('ollama_available', stats.get('cli_available', False)) else 'No'}")
-        print(f"Ollama Host: {stats.get('ollama_host', stats.get('cli_path', 'n/a'))}")
+        print("NEXUS LLM Health Check v3.0 — Ollama Cloud")
+        print("=" * 50)
+        print(llm.get_model_table())
+        print()
+        health = llm.get_health_status()
+        backend = health.get("_backend", {})
+        print(f"Active Backend: {backend.get('active', '?')}")
+        print(f"Cloud API:      {'OK' if backend.get('cloud') else 'NICHT VERFÜGBAR'}")
+        print(f"Local Ollama:   {'OK' if backend.get('local') else 'NICHT VERFÜGBAR'}")
+        print(f"z-ai CLI:       {'OK' if backend.get('zai_cli') else 'NICHT VERFÜGBAR'}")
+        print(f"API Key:        {'gesetzt' if backend.get('api_key_set') else 'NICHT GESETZT'}")
+        return
+
+    # ─── Test Models ───
+    if args.test_models:
+        from ollama_setup import OllamaSetup
+        setup = OllamaSetup()
+        setup.run_test_only()
         return
 
     # ─── Telegram Mode ───
@@ -80,10 +128,6 @@ def main():
 
     cli = NexusCLI(session_id=args.session)
 
-    if args.model:
-        cli.llm.default_level = 2  # Will use GLM standard
-    if args.thinking:
-        cli.llm.default_level = 3
     if args.max_steps:
         cli.guards.max_steps = args.max_steps
 

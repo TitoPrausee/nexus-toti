@@ -1,6 +1,6 @@
 """
-NEXUS Agent Base Class — Toti-derived v2.0
-Alle Agents erben von dieser Base mit Guards, State, Error-Learning und Skill-System.
+NEXUS Agent Base Class — Toti-derived v3.0
+Per-Agent Ollama Cloud Modell-Routing, Error-Learning, Skills, Guards.
 """
 
 import re
@@ -18,7 +18,7 @@ from .error_learning import ErrorLearningSystem
 
 
 class AgentBase:
-    """Base class für alle NEXUS Agents — Toti-derived mit Error-Learning und Skills."""
+    """Base class für alle NEXUS Agents — Per-Agent Modell, Error-Learning, Skills."""
 
     AGENT_ID: str = "BASE"
     AGENT_NAME: str = "Base Agent"
@@ -44,6 +44,16 @@ class AgentBase:
         self._conversation: list[Message] = []
         self._max_retries = 2
 
+    @property
+    def agent_model(self) -> str:
+        """Das diesem Agent zugewiesene Ollama Cloud Modell."""
+        return self.llm.get_model_for_agent(self.AGENT_ID)
+
+    @property
+    def agent_model_config(self) -> dict:
+        """Komplette Modell-Konfiguration für diesen Agent."""
+        return self.llm.get_agent_config(self.AGENT_ID)
+
     def _load_prompt(self) -> str:
         prompt_dir = Path(__file__).parent.parent / "prompts"
         prompt_path = prompt_dir / self.SYSTEM_PROMPT_FILE
@@ -52,11 +62,18 @@ class AgentBase:
         return f"Du bist {self.AGENT_NAME}, ein Agent im Nexus-System."
 
     def _build_messages(self, user_input: str, context: Optional[str] = None) -> list[Message]:
-        """Baue Message-Liste mit State, Memory, Error-Warnungen und Tool-Liste."""
+        """Baue Message-Liste mit State, Memory, Error-Warnungen, Tool-Liste und Modell-Info."""
         messages = []
 
         # System-Prompt mit Kontext und State
         sys_content = self._system_prompt
+
+        # Inject: Agent-Modell-Info
+        model_cfg = self.agent_model_config
+        sys_content += f"\n\n## DEIN MODELL\n"
+        sys_content += f"Modell: {model_cfg.get('model', 'unknown')}\n"
+        sys_content += f"Beschreibung: {model_cfg.get('description', 'N/A')}\n"
+        sys_content += f"Temperatur: {model_cfg.get('temperature', 0.5)}\n"
 
         # Inject aktuellen State
         state_json = self.state.get_state_json()
@@ -115,13 +132,12 @@ class AgentBase:
                 accept_if: Optional[str] = None, level: Optional[int] = None) -> dict:
         """
         Führe einen Task aus mit Guard-Checks, Error-Learning und strukturiertem Output.
+        Verwendet automatisch das per-agent Ollama Cloud Modell.
         """
         # Pre-Check mit Guards
         guard_result = self.guards.pre_check(task)
-        use_level = level or guard_result.suggested_level
 
         if not guard_result.allowed:
-            # Fehler im Error-Learning aufzeichnen
             self.error_learning.record_error(
                 error_class="AGENT_ERROR",
                 context=task[:300],
@@ -147,15 +163,15 @@ class AgentBase:
         # Baue Messages
         messages = self._build_messages(task, context)
 
-        # LLM-Call mit Model-Level-Routing
-        response = self.llm.chat(messages, level=use_level)
+        # LLM-Call mit Per-Agent Modell-Routing
+        response = self.llm.chat(messages, agent_id=self.AGENT_ID)
 
         # Wenn LLM-Fehler → im Error-Learning aufzeichnen
         if response.content.startswith("[LLM ERROR"):
             self.error_learning.record_error(
                 error_class="LLM_ERROR",
                 context=task[:300],
-                action=f"llm.chat(level={use_level})",
+                action=f"llm.chat(agent={self.AGENT_ID}, model={self.agent_model})",
                 error_message=response.content[:300],
                 agent=self.AGENT_ID,
             )
@@ -199,7 +215,7 @@ class AgentBase:
         # Confidence bestimmen
         confidence = min(1.0, 0.9 - (0.1 if guard_result.loop_detected else 0))
         if response.fallback_used:
-            confidence -= 0.1  # Weniger Confidence wenn Fallback-Model genutzt
+            confidence -= 0.1
 
         return {
             "status": "done",
@@ -209,7 +225,8 @@ class AgentBase:
             "flags": ["LOOP_DETECTED"] if guard_result.loop_detected else [],
             "confidence": confidence,
             "elapsed": response.elapsed,
-            "model_level": use_level,
+            "model": self.agent_model,
+            "backend": response.backend,
             "fallback_used": response.fallback_used,
         }
 
@@ -223,7 +240,6 @@ class AgentBase:
         for tool_name, params_str in matches:
             full_call = f"TOOL:{tool_name}({params_str})"
             tool_result = self.tools.parse_and_dispatch(full_call)
-            # Fehler im Error-Learning aufzeichnen
             self.error_learning.auto_record_from_result(
                 tool_result, action=full_call, agent=self.AGENT_ID, tool=tool_name
             )
@@ -253,7 +269,6 @@ class AgentBase:
     def _execute_skill(self, skill_name: str, params_str: str, task: str = "") -> Optional[dict]:
         """Führe einen Skill aus."""
         try:
-            # Parameter parsen
             kwargs = {}
             if params_str.strip():
                 try:
@@ -261,7 +276,6 @@ class AgentBase:
                 except json.JSONDecodeError:
                     kwargs = {"query": params_str.strip().strip('"').strip("'")}
 
-            # Skill-Module laden
             skill_map = {
                 "web_research": "skills.web_research",
                 "code_debug": "skills.code_debug",
@@ -279,18 +293,15 @@ class AgentBase:
             if not module_path:
                 return {"error": f"Skill '{skill_name}' nicht gefunden"}
 
-            # Dynamischer Import
             import importlib
             module = importlib.import_module(module_path)
 
-            # Skill ausführen
             result = module.execute(
                 llm_client=self.llm,
                 tools=self.tools,
                 **kwargs,
             )
 
-            # Ergebnis im Error-Learning tracken
             self.error_learning.auto_record_from_result(
                 result, action=f"SKILL:{skill_name}", agent=self.AGENT_ID, tool=skill_name,
             )
@@ -311,22 +322,13 @@ class AgentBase:
             return {"error": f"Skill '{skill_name}' fehlgeschlagen: {str(e)}"}
 
     def quick_response(self, message: str) -> str:
-        """Schnelle Chat-Antwort — kurzer Prompt, voller Gesprächsverlauf."""
-        # Kurzer Persönlichkeits-Prompt statt vollem System-Prompt mit Tools/Skills/State
-        chat_system = (
-            "Du bist Toti — autonomer Agent im Nexus-System. "
-            "Direkt, ehrlich, technisch präzise. Kein Fülltext, kein 'Natürlich!', kein 'Gerne!'. "
-            "Du hast Meinungen und vertrittst sie. "
-            "Du kannst Aufgaben autonom ausführen: Code schreiben, Dateien lesen, Web-Recherche, Debugging, Deployment und mehr. "
-            "Antworte kurz und konkret. Kommuniziere wie ein erfahrener Kollege, nicht wie ein Assistent."
-        )
-
-        messages = [Message(role="system", content=chat_system)]
-        # Gesprächsverlauf anhängen (max. letzte 10 Exchanges = 20 Messages)
+        """Schnelle Chat-Antwort mit Gesprächsverlauf."""
+        from .llm_client import TOTI_CHAT_PROMPT
+        messages = [Message(role="system", content=TOTI_CHAT_PROMPT)]
         messages.extend(self._conversation[-20:])
         messages.append(Message(role="user", content=message))
 
-        response = self.llm.chat(messages, level=1)
+        response = self.llm.chat(messages, agent_id=self.AGENT_ID)
         content = response.content
 
         self._conversation.append(Message(role="user", content=message))
@@ -347,6 +349,8 @@ class AgentBase:
         return {
             "agent_id": self.AGENT_ID,
             "agent_name": self.AGENT_NAME,
+            "model": self.agent_model,
+            "model_config": self.agent_model_config,
             "conversation_length": len(self._conversation),
             "guards": self.guards.get_status(),
             "state_task": self.state.get("current_task.status", "idle"),

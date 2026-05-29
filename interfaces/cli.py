@@ -1,6 +1,6 @@
 """
-NEXUS CLI Interface — Toti Edition v2.0
-Rich Terminal UI mit Error-Learning, LLM-Health, Skill-System und State-Display.
+NEXUS CLI Interface — Toti Edition v3.0
+Rich Terminal UI mit Ollama Cloud Integration, Error-Learning, Skill-System.
 """
 
 import sys
@@ -19,7 +19,7 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
-from core.llm_client import LLMClient
+from core.llm_client import LLMClient, DEFAULT_AGENT_MODELS
 from core.memory import MemorySystem
 from core.tools import ToolRegistry
 from core.state import StateManager
@@ -41,11 +41,12 @@ TOTI_THEME = {
     "toti.error": "#ff3366",
     "toti.dim": "#666666",
     "toti.info": "#888888",
+    "toti.model": "#bb86fc",
 }
 
 
 class NexusCLI:
-    """Terminal Interface für Toti-powered NEXUS v2.0."""
+    """Terminal Interface für Toti-powered NEXUS v3.0 mit Ollama Cloud."""
 
     def __init__(self, session_id: Optional[str] = None):
         self.console = Console(theme=Theme(TOTI_THEME)) if RICH_AVAILABLE else None
@@ -105,9 +106,9 @@ class NexusCLI:
 ║      ██║   ╚██████╔╝██║  ██║███████║                 ║
 ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝                 ║
 ║                                                       ║
-║   NEXUS System · Toti v2.0 · GLM Powered             ║
-║   Error Learning · 22 Tools · 10 Skills              ║
-║   Autonom · Direkt · Lernt aus Fehlern               ║
+║   NEXUS System · Toti v3.0 · Ollama Cloud             ║
+║   6 Agent-Modelle · Error Learning · 22 Tools         ║
+║   Autonom · Direkt · Lernt aus Fehlern                ║
 ║                                                       ║
 ╚═══════════════════════════════════════════════════════╝
 """
@@ -116,41 +117,64 @@ class NexusCLI:
         else:
             print(banner)
 
+    def print_model_table(self):
+        """Drucke die Modell-Zuordnungstabelle."""
+        if self.console:
+            table = Table(title="Ollama Cloud Modell-Zuordnung", border_style="toti.model")
+            table.add_column("Agent", style="toti.agent")
+            table.add_column("Modell", style="toti.model")
+            table.add_column("Backend", style="toti.info")
+            table.add_column("Status", style="toti.success")
+
+            health = self.llm.get_health_status()
+            for agent_id, cfg in DEFAULT_AGENT_MODELS.items():
+                model = cfg.get("model", "?")
+                h = health.get(agent_id, {})
+                backend = h.get("backend", "?")
+                status = "OK" if h.get("available", False) else h.get("error", "nicht getestet")[:30]
+                table.add_row(agent_id, model, backend, status)
+
+            self.console.print(table)
+        else:
+            print(self.llm.get_model_table())
+
     def print_status_bar(self):
         guards = self.guards.get_status()
         llm_stats = self.llm.get_stats()
         error_stats = self.error_learning.get_error_stats()
         task = self.state.get("current_task.status", "idle")
-        cli_status = "✓" if llm_stats["cli_available"] else "✗"
+
+        backend = llm_stats.get("active_backend", "?")
+        cloud = "Cloud:Y" if llm_stats.get("cloud_available") else "Cloud:N"
+        local = "Local:Y" if llm_stats.get("local_available") else "Local:N"
+        zai = "z-ai:Y" if llm_stats.get("zai_available") else "z-ai:N"
 
         self.print(
             f"  State: [toti.info]{task}[/] | "
             f"Budget: [toti.info]{guards['budget_used_pct']}%[/] | "
             f"Steps: [toti.info]{guards['steps']}/{guards['max_steps']}[/] | "
-            f"LLM: [toti.info]{cli_status} {llm_stats['total_calls']} calls[/] | "
+            f"LLM: [toti.info]{llm_stats['total_calls']} calls[/] | "
             f"Errors: [toti.info]{error_stats['total_unique_errors']} known/{error_stats['session_avoided']} avoided[/]"
         )
-
-        # LLM Health
-        health = self.llm.get_health_status()
-        if health:
-            models = health.get("health", {})
-            model_status = " | ".join(
-                f"{'✓' if v else '✗'}{k.split('-')[1][:5]}" for k, v in models.items()
-            )
-            self.print(f"  Models: [toti.info]{model_status}[/]")
+        self.print(
+            f"  Backend: [toti.model]{backend}[/] | "
+            f"[toti.info]{cloud} | {local} | {zai}[/] | "
+            f"API Key: [toti.info]{'gesetzt' if llm_stats.get('api_key_set') else 'FEHLT'}[/]"
+        )
 
     def run(self):
         self.running = True
         self.print_banner()
 
         # LLM Health-Check beim Start
-        self.print("  [toti.dim]Prüfe LLM-Modelle...[/]")
+        self.print("  [toti.dim]Prüfe Ollama Cloud Modelle...[/]")
         self.llm.run_health_check()
+        self.print_model_table()
+        self.print("")
         self.print_status_bar()
         self.print("")
-        self.print("  [toti.success]Toti v2.0 online. Fehler-Tracking aktiv. 22 Tools, 10 Skills bereit.[/]")
-        self.print("  [toti.dim]/help für Befehle · Ctrl+C oder /quit zum Beenden.[/]")
+        self.print("  [toti.success]Toti v3.0 online. Ollama Cloud Routing aktiv. 22 Tools, 10 Skills bereit.[/]")
+        self.print("  [toti.dim]/help für Befehle · /models für Modell-Status · Ctrl+C oder /quit zum Beenden.[/]")
         self.print("")
 
         while self.running:
@@ -179,18 +203,17 @@ class NexusCLI:
                             Panel(
                                 Markdown(response) if len(response) > 100 else response,
                                 title="[toti.brand]Toti[/]",
-                                subtitle=f"[toti.dim]{elapsed:.1f}s | Budget: {self.guards.get_status()['budget_used_pct']}%[/]",
+                                subtitle=f"[toti.dim]{elapsed:.1f}s | Backend: {self.llm.active_backend}[/]",
                                 border_style="toti.brand",
                             )
                         )
                     else:
-                        print(f"\n--- Toti ({elapsed:.1f}s) ---")
+                        print(f"\n--- Toti ({elapsed:.1f}s, {self.llm.active_backend}) ---")
                         print(response)
                         print("---")
 
                 except Exception as e:
                     self.print(f"  [toti.error]Error: {str(e)}[/]")
-                    # Fehler im Error-Learning aufzeichnen
                     self.error_learning.record_error(
                         error_class="AGENT_ERROR",
                         context=user_input[:200],
