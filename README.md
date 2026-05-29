@@ -14,23 +14,22 @@
 - [Architecture](#architecture)
   - [System Overview](#system-overview)
   - [Agent Team](#agent-team)
-  - [Core Subsystems](#core-subsystems)
+  - [Agent Routing](#agent-routing)
   - [LLM Backend Stack](#llm-backend-stack)
   - [Memory System](#memory-system)
-  - [Tool Registry](#tool-registry)
-  - [Skill System](#skill-system)
+  - [Delegation Engine](#delegation-engine)
   - [Error Learning](#error-learning)
   - [Smart Scheduler](#smart-scheduler)
   - [Safety Guards](#safety-guards)
   - [Request Flow](#request-flow)
+  - [Class Structure](#class-structure)
+- [Tool Registry](#tool-registry)
+- [Skill System](#skill-system)
 - [Installation](#installation)
   - [Local Setup](#local-setup)
   - [Docker Setup](#docker-setup)
 - [Configuration](#configuration)
 - [Usage](#usage)
-  - [CLI Mode](#cli-mode)
-  - [Telegram Bot](#telegram-bot)
-  - [Single Task](#single-task)
 - [Commands](#commands)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
@@ -45,10 +44,10 @@ NEXUS is an autonomous multi-agent system built around **Toti** — a primary ag
 **Key characteristics:**
 
 - **Autonomous by default** — Toti acts, then reports. No confirmation loops for routine operations.
-- **Per-agent model routing** — Each sub-agent runs on the best-fit LLM for its specialty (coding, research, analysis, etc.)
-- **Error learning** — NEXUS remembers every failure, classifies it, and avoids repeating the same mistake in future sessions.
+- **Per-agent model routing** — Each sub-agent runs on the best-fit LLM for its specialty.
+- **Error learning** — NEXUS remembers every failure, classifies it, and avoids repeating mistakes.
 - **Three interfaces** — Interactive CLI, single-task CLI, and a Telegram bot.
-- **Multi-backend LLM** — Ollama Cloud, local Ollama, or z-ai CLI — auto-detected and auto-fallback.
+- **Multi-backend LLM** — Ollama Cloud, local Ollama, or z-ai CLI — auto-detected with auto-fallback.
 
 ---
 
@@ -56,51 +55,74 @@ NEXUS is an autonomous multi-agent system built around **Toti** — a primary ag
 
 ### System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         NEXUS v3.0                              │
-│                                                                 │
-│   ┌──────────┐   ┌──────────┐   ┌──────────────────────────┐   │
-│   │   CLI    │   │ Telegram │   │     Single Task (--task)  │   │
-│   │Interface │   │   Bot    │   │                          │   │
-│   └────┬─────┘   └────┬─────┘   └────────────┬─────────────┘   │
-│        └──────────────┴──────────────────────┘                 │
-│                              │                                  │
-│                     ┌────────▼────────┐                         │
-│                     │   TOTI (Primary  │                         │
-│                     │     Agent)       │                         │
-│                     │   NEXUS-0 Model  │                         │
-│                     └────────┬────────┘                         │
-│                              │                                  │
-│          ┌───────────────────┼───────────────────┐              │
-│          │                   │                   │              │
-│   ┌──────▼──────┐   ┌────────▼──────┐   ┌───────▼──────┐       │
-│   │    SCOUT    │   │     FORGE     │   │     LENS     │       │
-│   │  glm-5.1   │   │ qwen3-coder  │   │  kimi-k2.6  │       │
-│   │ (Research) │   │   (Coding)   │   │  (Analysis) │       │
-│   └─────────────┘   └──────────────┘   └──────────────┘       │
-│                                                                 │
-│          ┌──────────────────────────────────┐                   │
-│          │                                  │                   │
-│   ┌──────▼──────┐                  ┌────────▼──────┐            │
-│   │   HERALD    │                  │     GHOST     │            │
-│   │minimax-m2.7 │                  │deepseek-flash │            │
-│   │  (Output)  │                  │ (Background)  │            │
-│   └─────────────┘                  └───────────────┘            │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Core Subsystems                       │   │
-│  │  Memory │ Tools (22) │ Skills (10) │ Guards │ Scheduler  │   │
-│  │         │            │             │        │ ErrorLearn │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Interfaces
+        CLI[CLI Interface]
+        TG[Telegram Bot]
+        TASK[Single Task --task]
+    end
+
+    subgraph Primary["Primary Agent"]
+        TOTI["🤖 TOTI / NEXUS-0<br/>kimi-k2.6:cloud"]
+    end
+
+    subgraph SubAgents["Sub-Agent Team"]
+        SCOUT["🔍 SCOUT<br/>glm-5.1:cloud<br/>Research"]
+        FORGE["⚒️ FORGE<br/>qwen3-coder-next:cloud<br/>Coding"]
+        LENS["🔬 LENS<br/>kimi-k2.6:cloud<br/>Analysis"]
+        HERALD["📢 HERALD<br/>minimax-m2.7:cloud<br/>Output"]
+        GHOST["👻 GHOST<br/>deepseek-v4-flash:cloud<br/>Background"]
+    end
+
+    subgraph Core["Core Subsystems"]
+        MEM["Memory<br/>L1 / L2 / L3"]
+        TOOLS["Tools<br/>22 built-in"]
+        SKILLS["Skills<br/>10 modules"]
+        GUARDS["Safety Guards<br/>Loop · Steps · Budget"]
+        SCHED["Smart Scheduler<br/>4 Trigger Types"]
+        ERR["Error Learning<br/>Record · Warn · Fix"]
+    end
+
+    subgraph LLM["LLM Backend"]
+        CLOUD["Ollama Cloud API<br/>api.ollama.ai"]
+        LOCAL["Local Ollama<br/>localhost:11434"]
+        ZAI["z-ai CLI<br/>GLM Fallback"]
+    end
+
+    CLI --> TOTI
+    TG --> TOTI
+    TASK --> TOTI
+
+    TOTI --> SCOUT
+    TOTI --> FORGE
+    TOTI --> LENS
+    TOTI --> HERALD
+    TOTI --> GHOST
+
+    TOTI --> MEM
+    TOTI --> TOOLS
+    TOTI --> SKILLS
+    TOTI --> GUARDS
+    TOTI --> SCHED
+    TOTI --> ERR
+
+    SCOUT --> CLOUD
+    FORGE --> CLOUD
+    LENS --> CLOUD
+    HERALD --> CLOUD
+    GHOST --> CLOUD
+    TOTI --> CLOUD
+
+    CLOUD -.->|fallback| LOCAL
+    LOCAL -.->|fallback| ZAI
 ```
 
 ---
 
 ### Agent Team
 
-NEXUS uses a team of 6 specialized agents. Each agent runs on a different LLM optimized for its task type.
+NEXUS uses a team of 6 specialized agents, each running on the LLM best suited for its role.
 
 | Agent | Model | Specialty | Temp | Max Tokens |
 |-------|-------|-----------|------|------------|
@@ -111,136 +133,449 @@ NEXUS uses a team of 6 specialized agents. Each agent runs on a different LLM op
 | **HERALD** | `minimax-m2.7:cloud` | Documentation, formatting, structured output | 0.6 | 4096 |
 | **GHOST** | `deepseek-v4-flash:cloud` | Background monitoring, state persistence, scheduling | 0.3 | 2048 |
 
-<details>
-<summary><strong>Agent Routing Logic (click to expand)</strong></summary>
-
-When Toti receives a message, it runs through three layers of routing:
-
-```
-Input
-  │
-  ├─ Is it a /command?  ──────────────────────────────► handle_command()
-  │
-  ├─ Is it conversational? (≤3 words, greeting, identity question)
-  │    └─ YES ─────────────────────────────────────────► quick_response()
-  │                                                       (short prompt + history)
-  │
-  └─ Assess complexity:
-       │
-       ├─ simple  ──────────────────────────────────────► quick_response()
-       │
-       ├─ moderate  ────────────────────────────────────► toti.execute()
-       │                                                   (full context, NEXUS-0 model)
-       │
-       └─ complex  ────────────────────────────────────► delegation.decompose_task()
-                                                           ├─ SCOUT  (research subtasks)
-                                                           ├─ FORGE  (code subtasks)
-                                                           ├─ LENS   (review subtasks)
-                                                           ├─ HERALD (output subtasks)
-                                                           └─ GHOST  (background subtasks)
-```
-
-Complexity is assessed by counting task indicators (keywords like "build", "debug", "deploy", "and then") and word count. Tasks with ≥3 indicators or >40 words trigger full DAG delegation.
-
-</details>
-
 ---
 
-### Core Subsystems
+### Agent Routing
 
-<details>
-<summary><strong>Delegation Engine (click to expand)</strong></summary>
+Every incoming message passes through a three-layer routing decision before reaching an agent.
 
-The `DelegationEngine` in `core/delegation.py` handles complex multi-step task decomposition:
+```mermaid
+flowchart TD
+    IN([User Input]) --> CMD{Starts with /command?}
 
-1. **Task Decomposition** — Uses the LLM to break a complex task into a Directed Acyclic Graph (DAG) of subtasks.
-2. **Dependency Resolution** — Subtasks with dependencies wait for their prerequisites to complete.
-3. **Parallel Execution** — Independent subtasks run in parallel where possible.
-4. **Result Aggregation** — Results from all subtasks are merged into a final response.
+    CMD -->|Yes| HANDLE[_handle_command]
+    HANDLE --> OUT1([Return formatted response])
 
+    CMD -->|No| CONV{Is conversational?\n≤3 words · greeting · identity}
+
+    CONV -->|Yes| QUICK[quick_response\nshort prompt + history]
+    QUICK --> LLM1[llm.chat NEXUS-0]
+    LLM1 --> LOG1[Update _conversation\nsession_log]
+    LOG1 --> OUT2([Return response])
+
+    CONV -->|No| COMPLEX{Assess complexity}
+
+    COMPLEX -->|simple| QUICK
+    COMPLEX -->|moderate| EXEC[toti.execute\nfull context · NEXUS-0 model]
+    EXEC --> BUILD[_build_messages\nsystem prompt · state · memory\nerror warnings · tools · skills]
+    BUILD --> LLM2[llm.chat NEXUS-0]
+    LLM2 --> TOOLS_PROC[_process_tool_calls\n_process_skill_calls]
+    TOOLS_PROC --> ERR_LOG[error_learning.auto_record]
+    ERR_LOG --> OUT3([Return processed result])
+
+    COMPLEX -->|complex| DAG[_delegate_complex\nDAG decomposition]
+    DAG --> DECOMP[delegation.decompose_task\nLLM generates subtask DAG]
+    DECOMP --> PLAN[delegation.execute_plan]
+    PLAN --> PARALLEL["Parallel execution:\nSCOUT · FORGE · LENS · HERALD"]
+    PARALLEL --> MERGE[merge_results]
+    MERGE --> OUT4([Return final response])
+
+    style IN fill:#4a9eff,color:#fff
+    style OUT1 fill:#2ecc71,color:#fff
+    style OUT2 fill:#2ecc71,color:#fff
+    style OUT3 fill:#2ecc71,color:#fff
+    style OUT4 fill:#2ecc71,color:#fff
+    style DAG fill:#e67e22,color:#fff
+    style EXEC fill:#9b59b6,color:#fff
 ```
-complex task
-     │
-     ▼
-decompose_task()  ──► LLM generates DAG JSON
-     │
-     ▼
-execute_plan()
-     ├─ subtask A (SCOUT)  ─────────────────────────────────► result_A
-     ├─ subtask B (FORGE)  ─────────────────────────────────► result_B
-     └─ subtask C (LENS, depends on B) ── waits for B ──────► result_C
-                                                                   │
-                                                                   ▼
-                                                           merge_results()
-```
-
-</details>
-
-<details>
-<summary><strong>Memory System — 3 Levels (click to expand)</strong></summary>
-
-`core/memory.py` implements a 3-level hierarchical memory:
-
-```
-L1 — Session Memory (volatile, in-RAM)
-     • Conversation history for current session
-     • Key-value store for session-scoped data
-     • Rolling summary (auto-compressed every 10 entries)
-     • Cleared on /reset or new session
-
-L2 — Skill Memory (persistent, file-based)
-     • Solution patterns that worked in past sessions
-     • Stored as JSON in memory/skills/
-     • Example: "how to fix this type of import error"
-     • Survives restarts
-
-L3 — Long-Term Memory (persistent, file-based)
-     • Facts, preferences, project context
-     • GEPA self-improvement analysis results
-     • Stored as JSON in memory/longterm/
-     • Survives restarts
-```
-
-The `build_context()` method merges all three levels into a single context string that gets injected into the system prompt for every LLM call.
-
-</details>
 
 ---
 
 ### LLM Backend Stack
 
-NEXUS supports three backends, tried in priority order:
+NEXUS auto-detects the available backend at startup and falls back gracefully.
 
-```
-┌──────────────────────────────────────────────────────┐
-│                  Backend Priority                    │
-│                                                      │
-│  1. Ollama Cloud API  (if OLLAMA_API_KEY is set)     │
-│     └─ Endpoint: https://api.ollama.ai               │
-│     └─ Per-agent model routing (see Agent Team)      │
-│                                                      │
-│  2. Local Ollama  (if localhost:11434 responds)       │
-│     └─ Endpoint: http://localhost:11434              │
-│     └─ Falls back to llama3.2:latest or configured   │
-│                                                      │
-│  3. z-ai CLI  (if `z-ai` binary found in PATH)       │
-│     └─ ZhipuAI GLM-4-Plus / GLM-4-Flash              │
-│     └─ Legacy fallback only                          │
-└──────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Detection["Startup Detection"]
+        A{OLLAMA_API_KEY\nset?}
+        B{localhost:11434\nreachable?}
+        C{z-ai binary\nin PATH?}
+    end
 
-The active backend is auto-detected at startup. You can force a specific backend in `config.yaml`:
+    subgraph Backends
+        CLOUD["☁️ Ollama Cloud API\nhttps://api.ollama.ai\nPer-agent model routing"]
+        LOCAL["🖥️ Local Ollama\nlocalhost:11434\nSingle model for all agents"]
+        ZAI["⚡ z-ai CLI\nGLM-4-Plus / GLM-4-Flash\nLegacy fallback"]
+        NONE["❌ No backend\nError: configure at least one"]
+    end
 
-```yaml
-ollama:
-  mode: "cloud"    # "cloud" | "local" | "hybrid"
+    A -->|Yes| CLOUD
+    A -->|No| B
+    B -->|Yes| LOCAL
+    B -->|No| C
+    C -->|Yes| ZAI
+    C -->|No| NONE
+
+    CLOUD -.->|model fails| LOCAL
+    LOCAL -.->|unreachable| ZAI
+
+    style CLOUD fill:#27ae60,color:#fff
+    style LOCAL fill:#2980b9,color:#fff
+    style ZAI fill:#8e44ad,color:#fff
+    style NONE fill:#c0392b,color:#fff
 ```
 
 ---
 
-### Tool Registry
+### Memory System
 
-22 built-in tools, dispatched via `TOOL:name(params)` syntax in LLM output.
+```mermaid
+classDiagram
+    class MemorySystem {
+        +session_id: str
+        -_l1: dict
+        -_l1_history: list
+        -_rolling_summary: str
+        +session_write(key, value)
+        +session_read(key) Any
+        +session_log(role, content, agent)
+        +session_get_history(last_n) list
+        +session_save()
+        +session_load(session_id) bool
+        +session_clear()
+        +skill_write(name, pattern, description)
+        +skill_read(name) dict
+        +skill_list() list
+        +longterm_write(key, value)
+        +longterm_read(key) Any
+        +longterm_list() list
+        +build_context(query) str
+        -_compress_rolling_summary()
+    }
+
+    class L1SessionMemory {
+        <<volatile · in-RAM>>
+        Conversation history
+        Key-value session data
+        Rolling summary
+        Cleared on reset
+    }
+
+    class L2SkillMemory {
+        <<persistent · file-based>>
+        Solution patterns
+        memory/skills/*.json
+        Survives restarts
+    }
+
+    class L3LongTermMemory {
+        <<persistent · file-based>>
+        Facts and preferences
+        GEPA analysis results
+        memory/longterm/*.json
+        Survives restarts
+    }
+
+    MemorySystem "1" --> "1" L1SessionMemory
+    MemorySystem "1" --> "1" L2SkillMemory
+    MemorySystem "1" --> "1" L3LongTermMemory
+```
+
+---
+
+### Delegation Engine
+
+```mermaid
+sequenceDiagram
+    participant T as Toti
+    participant D as DelegationEngine
+    participant LLM as LLM (NEXUS-0)
+    participant S as SCOUT
+    participant F as FORGE
+    participant L as LENS
+
+    T->>D: decompose_task(complex_task, context)
+    D->>LLM: "Break this into subtasks as DAG JSON"
+    LLM-->>D: DAG JSON [{id, agent, task, depends_on}]
+
+    D->>D: execute_plan(dag)
+    note over D: Resolve dependency order
+
+    par Independent subtasks run in parallel
+        D->>S: execute(subtask_A)
+        S-->>D: result_A
+    and
+        D->>F: execute(subtask_B)
+        F-->>D: result_B
+    end
+
+    note over D: subtask_C depends on subtask_B
+    D->>L: execute(subtask_C, context=result_B)
+    L-->>D: result_C
+
+    D->>D: merge_results(result_A, result_B, result_C)
+    D-->>T: final_result
+```
+
+---
+
+### Error Learning
+
+```mermaid
+stateDiagram-v2
+    [*] --> Monitoring : Agent starts
+
+    Monitoring --> Recording : Tool call / LLM call / Agent step fails
+
+    Recording --> Classifying : Error detected
+    Classifying --> Stored : Classify into error class\nTOOL_ERROR · AGENT_ERROR\nPARSE_ERROR · LOOP_ERROR\nTIMEOUT_ERROR · LLM_ERROR\nVALIDATION_ERROR · PERMISSION_ERROR
+
+    Stored --> Monitoring : Continue
+
+    Monitoring --> Checking : Before each new action
+    Checking --> Warning : Similar past error found\nsimilarity > 0.3
+    Warning --> Injecting : Inject warning into system prompt\n"⚠ TOOL_ERROR: use absolute paths"
+    Injecting --> Monitoring : Agent adjusts approach
+
+    Monitoring --> Consolidating : Every 600s (GEPA trigger)
+    Consolidating --> Pruning : Merge duplicate errors
+    Pruning --> Promoting : Remove errors older than 7 days
+    Promoting --> Monitoring : Promote fixed errors as SOLUTION hints
+
+    Monitoring --> [*] : Session ends
+```
+
+---
+
+### Smart Scheduler
+
+```mermaid
+graph LR
+    subgraph Triggers["4 Trigger Types"]
+        IT[INTERVAL_TRIGGER\nFixed interval\nskips if nothing changed]
+        CT[CHANGE_TRIGGER\nFile/dir changes\nwatches paths]
+        IDT[IDLE_TRIGGER\nSystem idle\nfor N seconds]
+        TT[THRESHOLD_TRIGGER\nMetric crosses\na threshold]
+    end
+
+    subgraph DefaultTasks["Default Scheduled Tasks"]
+        SP[state_persist\nINTERVAL · 60s]
+        MC[memory_compress\nINTERVAL · 300s]
+        EC[error_consolidate\nINTERVAL · 600s]
+        LC[log_cleanup\nCHANGE · data/state/]
+    end
+
+    IT --> SP
+    IT --> MC
+    IT --> EC
+    CT --> LC
+
+    subgraph Runtime["Runtime via scheduler_tool"]
+        ADD[Add task]
+        LIST[List tasks]
+        REMOVE[Remove task]
+    end
+
+    TT -.->|example| Runtime
+    IDT -.->|example| Runtime
+```
+
+---
+
+### Safety Guards
+
+```mermaid
+flowchart TD
+    IN([Incoming Task]) --> STEPS{Steps ≤ max_steps?\ndefault: 10}
+
+    STEPS -->|No| ABORT1[Abort task\nRecord in Error Learning]
+    STEPS -->|Yes| BUDGET{Budget used\n≤ 90%?}
+
+    BUDGET -->|No| WARN[Emit budget warning\nContinue with caution]
+    BUDGET -->|Yes| LOOP{Loop detected?\nHash last N outputs\nHash last N actions}
+
+    WARN --> LOOP
+
+    LOOP -->|Yes| ABORT2[Abort task\nRecord LOOP_ERROR\nSuggest different approach]
+    LOOP -->|No| ALLOW([Task allowed\nProceed])
+
+    style ABORT1 fill:#c0392b,color:#fff
+    style ABORT2 fill:#c0392b,color:#fff
+    style ALLOW fill:#27ae60,color:#fff
+    style WARN fill:#e67e22,color:#fff
+```
+
+---
+
+### Request Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant IF as Interface\n(CLI / Telegram)
+    participant T as Toti
+    participant G as Guards
+    participant EL as ErrorLearning
+    participant LLM as LLMClient
+    participant TOOL as ToolRegistry
+    participant D as Delegation
+
+    User->>IF: Send message
+    IF->>T: process(user_input)
+
+    alt /command
+        T-->>IF: _handle_command() → formatted string
+    else conversational or short
+        T->>LLM: chat(short_prompt + history, NEXUS-0)
+        LLM-->>T: response
+        T->>T: update _conversation[]
+        T-->>IF: response
+    else moderate complexity
+        T->>G: pre_check(task)
+        G-->>T: allowed / blocked
+        T->>EL: check_before_action(task)
+        EL-->>T: warnings (injected into prompt)
+        T->>LLM: chat(full_context, NEXUS-0)
+        LLM-->>T: response with TOOL:/SKILL: calls
+        T->>TOOL: _process_tool_calls()
+        TOOL-->>T: tool results
+        T->>EL: auto_record(result)
+        T-->>IF: processed result
+    else complex
+        T->>D: decompose_task(task)
+        D->>LLM: generate DAG JSON
+        LLM-->>D: subtask DAG
+        D->>D: execute_plan() — parallel where possible
+        D-->>T: merged results
+        T-->>IF: final response
+    end
+
+    IF-->>User: Display response
+```
+
+---
+
+### Class Structure
+
+```mermaid
+classDiagram
+    class AgentBase {
+        +AGENT_ID: str
+        +AGENT_NAME: str
+        +SYSTEM_PROMPT_FILE: str
+        #llm: LLMClient
+        #memory: MemorySystem
+        #tools: ToolRegistry
+        #guards: NexusGuards
+        #state: StateManager
+        #error_learning: ErrorLearningSystem
+        #_conversation: list[Message]
+        +execute(task, context, level) dict
+        +quick_response(message) str
+        +reset_conversation()
+        #_build_messages(user_input, context) list
+        #_process_tool_calls(content) str
+        #_process_skill_calls(content, task) str
+        #_load_prompt() str
+    }
+
+    class TotiAgent {
+        +AGENT_ID = "NEXUS-0"
+        -delegation: DelegationEngine
+        +process(user_input) str
+        +register_agent(id, agent)
+        -_is_conversational(task) bool
+        -_assess_complexity(task) str
+        -_delegate_complex(task) str
+        -_handle_command(command) str
+        -_gepa_evolve(task) str
+    }
+
+    class ScoutAgent {
+        +AGENT_ID = "SCOUT"
+    }
+
+    class ForgeAgent {
+        +AGENT_ID = "FORGE"
+    }
+
+    class LensAgent {
+        +AGENT_ID = "LENS"
+    }
+
+    class HeraldAgent {
+        +AGENT_ID = "HERALD"
+    }
+
+    class GhostAgent {
+        +AGENT_ID = "GHOST"
+        +scheduler: SmartScheduler
+    }
+
+    class LLMClient {
+        -_active_backend: str
+        -_agent_models: dict
+        -_cloud_available: bool
+        -_local_available: bool
+        -_zai_available: bool
+        +chat(messages, agent_id) LLMResponse
+        +quick_response(message, agent_id) str
+        +run_health_check() dict
+        +get_model_for_agent(agent_id) str
+        +get_health_status() dict
+    }
+
+    class DelegationEngine {
+        -_agents: dict
+        +register_agent(id, agent)
+        +decompose_task(task, context) list
+        +execute_plan(dag) dict
+        -merge_results(results) dict
+    }
+
+    class ErrorLearningSystem {
+        +record_error(class, context, action, message, agent)
+        +check_before_action(action) list
+        +auto_record_from_result(result, action, agent)
+        +consolidate()
+        +get_error_stats() dict
+        +build_error_context(task) str
+    }
+
+    class NexusGuards {
+        +max_steps: int
+        +budget_limit_pct: float
+        +pre_check(task) GuardResult
+        +check_loop(output) bool
+        +reset()
+        +get_status() dict
+    }
+
+    class SmartScheduler {
+        +add_task(task_id, trigger, ...)
+        +remove_task(task_id)
+        +get_status() dict
+        +start()
+        +stop()
+    }
+
+    AgentBase <|-- TotiAgent
+    AgentBase <|-- ScoutAgent
+    AgentBase <|-- ForgeAgent
+    AgentBase <|-- LensAgent
+    AgentBase <|-- HeraldAgent
+    AgentBase <|-- GhostAgent
+
+    TotiAgent --> DelegationEngine
+    DelegationEngine --> ScoutAgent
+    DelegationEngine --> ForgeAgent
+    DelegationEngine --> LensAgent
+    DelegationEngine --> HeraldAgent
+    DelegationEngine --> GhostAgent
+
+    AgentBase --> LLMClient
+    AgentBase --> MemorySystem
+    AgentBase --> NexusGuards
+    AgentBase --> ErrorLearningSystem
+    GhostAgent --> SmartScheduler
+```
+
+---
+
+## Tool Registry
+
+22 built-in tools dispatched via `TOOL:name(params)` syntax in LLM output.
 
 <details>
 <summary><strong>Base Tools — 6 (click to expand)</strong></summary>
@@ -290,183 +625,22 @@ ollama:
 
 ---
 
-### Skill System
+## Skill System
 
-Skills are specialized Python modules in `skills/` that implement multi-step workflows. Agents call them via `SKILL:name(params)` syntax.
+Skills are specialized Python modules in `skills/` implementing multi-step workflows. Agents invoke them via `SKILL:name(params)` syntax.
 
 | Skill | Description |
 |-------|-------------|
 | `web_research` | Deep web research with source triangulation and confidence scoring |
 | `code_debug` | Root-cause error analysis: read error → identify cause → fix → validate |
 | `code_review` | Structured code review with quality verdict and improvement suggestions |
-| `security_scan` | Scan code and dependencies for vulnerabilities |
+| `security_scan` | Scan code and dependencies for known vulnerabilities |
 | `data_extract` | Extract and process data from CSV, JSON, APIs, web pages, or databases |
 | `test_gen` | Automatically generate unit tests for Python/JS code |
 | `doc_gen` | Generate README, API docs, or CHANGELOG from code |
 | `deploy_prep` | Validate and prepare deployments for Docker, Kubernetes, or VPS |
 | `dependency_check` | Check dependencies for updates, conflicts, and security issues |
 | `performance` | Profile and optimize code performance |
-
----
-
-### Error Learning
-
-`core/error_learning.py` is NEXUS's self-improvement loop. It runs entirely locally (no LLM calls) and operates in three phases:
-
-```
-Phase 1 — Record
-  Every tool call, agent step, and LLM response is monitored.
-  Failures are classified into error classes:
-    TOOL_ERROR, AGENT_ERROR, PARSE_ERROR, LOOP_ERROR,
-    TIMEOUT_ERROR, LLM_ERROR, VALIDATION_ERROR,
-    PERMISSION_ERROR, DEPENDENCY_ERROR
-
-Phase 2 — Warn
-  Before each action, the error database is checked for similar past failures.
-  Warnings are injected into the system prompt:
-    "⚠ TOOL_ERROR: read_file on /tmp/ failed before — use absolute paths"
-
-Phase 3 — Consolidate (GEPA trigger, every 10 min)
-  Old duplicate errors are merged.
-  Errors older than 7 days are pruned.
-  Successful fixes are promoted as SOLUTION hints.
-```
-
-<details>
-<summary><strong>Error record format (click to expand)</strong></summary>
-
-```json
-{
-  "error_class": "TOOL_ERROR",
-  "context": "reading config from relative path",
-  "action": "TOOL:read_file(path=config.yaml)",
-  "error_message": "FileNotFoundError: config.yaml",
-  "agent": "FORGE",
-  "tool": "read_file",
-  "hint": "Use absolute paths — relative paths fail depending on working directory",
-  "solution": "Use os.path.abspath() or Path(__file__).parent / 'config.yaml'",
-  "solved": true,
-  "occurrences": 3,
-  "timestamp": 1700000000
-}
-```
-
-</details>
-
----
-
-### Smart Scheduler
-
-`core/scheduler.py` replaces dumb time-based crons with 4 intelligent trigger types:
-
-| Trigger | Fires when... | Use case |
-|---------|---------------|----------|
-| `INTERVAL_TRIGGER` | Fixed interval, but skips if nothing changed | State persistence every 60s |
-| `CHANGE_TRIGGER` | A watched file/directory changes | Log cleanup when state/ changes |
-| `IDLE_TRIGGER` | System has been idle for N seconds | Memory compression during idle |
-| `THRESHOLD_TRIGGER` | A metric crosses a threshold | Alert when budget > 90% |
-
-Default scheduled tasks (configured in `config.yaml`):
-
-```
-state_persist     — INTERVAL_TRIGGER, every 60s
-memory_compress   — INTERVAL_TRIGGER, every 300s
-error_consolidate — INTERVAL_TRIGGER, every 600s
-log_cleanup       — CHANGE_TRIGGER, watches data/state/
-```
-
----
-
-### Safety Guards
-
-`core/guards.py` runs locally (zero LLM cost) and enforces three limits:
-
-```
-Max Steps Guard       — Stops a task after N steps (default: 10)
-                        Prevents infinite loops in agentic chains
-
-Budget Guard          — Tracks estimated token usage per session
-                        Warns when budget_used_pct > 90%
-
-Loop Detection Guard  — Hashes recent outputs and actions
-                        Triggers if the same pattern repeats within
-                        a window of 3 outputs or 5 actions
-```
-
-When a guard triggers, the task is aborted and the error is recorded in Error Learning.
-
----
-
-### Request Flow
-
-Complete flow from user input to final response:
-
-```
-User Input
-    │
-    ▼
-telegram_bot.handle_message()  OR  cli.run()
-    │
-    ▼
-toti.process(user_input)
-    │
-    ├── /command ──────────────────────────────► toti._handle_command()
-    │                                                      │
-    │                                                      ▼
-    │                                              Return formatted string
-    │
-    ├── conversational / short ─────────────────► toti.quick_response()
-    │                                                      │
-    │                                            [short system prompt]
-    │                                            [last 20 conversation turns]
-    │                                            [current message]
-    │                                                      │
-    │                                                      ▼
-    │                                            llm.chat(agent_id="NEXUS-0")
-    │                                                      │
-    │                                            update _conversation[]
-    │                                            session_log("user", "assistant")
-    │                                                      │
-    │                                                      ▼
-    │                                              Return response
-    │
-    ├── moderate complexity ─────────────────────► toti.execute(task)
-    │                                                      │
-    │                                         guards.pre_check() ──► abort if blocked
-    │                                         error_learning.check_before_action()
-    │                                         _build_messages()
-    │                                           └─ full system prompt
-    │                                           └─ state JSON
-    │                                           └─ memory context (L1+L2+L3)
-    │                                           └─ error warnings
-    │                                           └─ tool list (22 tools)
-    │                                           └─ skill list (10 skills)
-    │                                           └─ conversation history
-    │                                                      │
-    │                                         llm.chat(agent_id="NEXUS-0")
-    │                                         _process_tool_calls()  ──► execute tools
-    │                                         _process_skill_calls() ──► execute skills
-    │                                         error_learning.auto_record()
-    │                                                      │
-    │                                                      ▼
-    │                                              Return processed result
-    │
-    └── complex ─────────────────────────────────► toti._delegate_complex(task)
-                                                           │
-                                               delegation.decompose_task()
-                                                 └─ LLM generates DAG JSON
-                                                           │
-                                               delegation.execute_plan()
-                                                 ├─ SCOUT.execute(subtask)
-                                                 ├─ FORGE.execute(subtask)
-                                                 ├─ LENS.execute(subtask)
-                                                 └─ HERALD.execute(subtask)
-                                                           │
-                                               merge_results()
-                                                           │
-                                                           ▼
-                                                   Return final response
-```
 
 ---
 
@@ -477,63 +651,53 @@ toti.process(user_input)
 **Requirements:** Python 3.10+, [Ollama](https://ollama.ai) installed
 
 ```bash
-# 1. Clone the repo
+# Clone
 git clone https://github.com/TitoPrausee/nexus-toti.git
 cd nexus-toti
 
-# 2. Install Python dependencies
+# Install dependencies
 pip install rich pyyaml
+pip install python-telegram-bot  # optional, for Telegram bot
 
-# Optional: Telegram bot support
-pip install python-telegram-bot
+# Pull a local model (if not using Ollama Cloud)
+ollama pull qwen2.5:3b        # ~2 GB RAM — recommended for local use
+ollama pull llama3.2:latest   # ~4 GB RAM
 
-# 3. Pull a local model (if not using Ollama Cloud)
-ollama pull qwen2.5:3b        # lightweight, ~2GB RAM
-# or
-ollama pull llama3.2:latest   # ~4GB RAM
-
-# 4. Configure (optional — works out of the box with local Ollama)
+# Configure (optional — works out of the box with local Ollama)
 cp .env.example .env
-# Edit .env to set OLLAMA_API_KEY if using Ollama Cloud
 
-# 5. Run
+# Run
 python nexus.py
 ```
 
-**Using Ollama Cloud (for per-agent model routing):**
+**Using Ollama Cloud:**
 
 ```bash
-# Option A: via environment variable
+# Option A: environment variable
 export OLLAMA_API_KEY=your-key-here
 python nexus.py
 
 # Option B: interactive setup wizard
 python nexus.py --setup
 
-# Option C: directly in config.yaml
-# Edit config.yaml → ollama.api_key
+# Option C: edit config.yaml directly
+# ollama.api_key: "your-key-here"
 ```
-
----
 
 ### Docker Setup
 
 ```bash
-# 1. Copy and configure environment
-cp .env.example .env
-# Edit .env
+cp .env.example .env  # edit as needed
 
-# 2. Build and run (interactive CLI)
+# Interactive CLI
 docker compose run --rm nexus
 
-# 3. Telegram bot mode
+# Telegram bot (runs as daemon)
 docker compose --profile telegram up nexus-telegram -d
 
-# 4. Single task
-docker compose run --rm nexus --task "Write a Python script that lists all files in /tmp"
+# Single task
+docker compose run --rm nexus --task "List all Python files in /app"
 ```
-
-**Environment variables for Docker:**
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -556,7 +720,7 @@ All configuration lives in `config.yaml`.
 ollama:
   base_url: "https://api.ollama.ai"
   local_url: "http://localhost:11434"
-  api_key: ""                # or set OLLAMA_API_KEY env var
+  api_key: ""                # or OLLAMA_API_KEY env var
   mode: "cloud"              # "cloud" | "local" | "hybrid"
 
   agent_models:
@@ -566,9 +730,8 @@ ollama:
       max_tokens: 4096
     FORGE:
       model: "qwen3-coder-next:cloud"
-      temperature: 0.3       # lower = more deterministic for code
+      temperature: 0.3
       max_tokens: 8192
-    # ... see config.yaml for all agents
 ```
 
 </details>
@@ -578,10 +741,10 @@ ollama:
 
 ```yaml
 guards:
-  max_steps: 10              # Max steps per task before abort
-  budget_limit_pct: 90.0     # Warn when this % of estimated budget is used
-  loop_detection_window: 3   # Hash last N outputs for loop detection
-  action_loop_window: 5      # Hash last N actions for loop detection
+  max_steps: 10
+  budget_limit_pct: 90.0
+  loop_detection_window: 3
+  action_loop_window: 5
 ```
 
 </details>
@@ -596,9 +759,6 @@ scheduler:
     state_persist:
       trigger: INTERVAL_TRIGGER
       interval_seconds: 60
-    memory_compress:
-      trigger: INTERVAL_TRIGGER
-      interval_seconds: 300
     log_cleanup:
       trigger: CHANGE_TRIGGER
       watch: "data/state/"
@@ -612,9 +772,8 @@ scheduler:
 ```yaml
 telegram:
   enabled: false
-  token: ""                  # or set NEXUS_TG_TOKEN env var
-  authorized_users: []       # empty = all users allowed
-                             # [12345678, 87654321] = restrict to these IDs
+  token: ""                  # or NEXUS_TG_TOKEN env var
+  authorized_users: []       # empty = all users; [12345678] = restrict
 ```
 
 </details>
@@ -623,72 +782,33 @@ telegram:
 
 ## Usage
 
-### CLI Mode
-
 ```bash
-python nexus.py
-```
-
-Interactive REPL with Toti. Type any task or use `/commands`.
-
-```
-Toti > What files are in the current directory?
-Toti > Write a FastAPI endpoint that returns system info
-Toti > Debug this error: ModuleNotFoundError: No module named 'requests'
-Toti > Review my code in src/main.py for security issues
-```
-
-### Telegram Bot
-
-```bash
-# Set token
-export NEXUS_TG_TOKEN=your-bot-token
-
-# Start bot
-python nexus.py --telegram
-
-# Or with Docker
-docker compose --profile telegram up nexus-telegram -d
-```
-
-Each Telegram user gets their own isolated session with persistent memory.
-
-### Single Task
-
-```bash
-# Run a single task and exit
-python nexus.py --task "Create a requirements.txt from imports in src/"
-
-# Show model routing table
-python nexus.py --models
-
-# Run health check
-python nexus.py --health
-
-# Setup Ollama Cloud
-python nexus.py --setup --api-key YOUR_KEY
-
-# Resume a previous session
-python nexus.py --session session_1700000000
+python nexus.py                          # Interactive CLI
+python nexus.py --task "..."             # Single task and exit
+python nexus.py --telegram               # Start Telegram bot
+python nexus.py --health                 # LLM health check
+python nexus.py --models                 # Show model routing table
+python nexus.py --setup                  # Ollama Cloud setup wizard
+python nexus.py --session ID             # Resume previous session
 ```
 
 ---
 
 ## Commands
 
-Available in CLI and Telegram:
+Available in both CLI and Telegram:
 
 | Command | Description |
 |---------|-------------|
-| `/status` | System status: guards, budget, LLM stats, agent count, scheduler |
-| `/health` | Run LLM health check for all models |
-| `/memory` | Show memory overview: L1 session, L2 skills, L3 long-term |
-| `/state` | Show raw state JSON |
-| `/errors` | Error Learning statistics and recent failures |
-| `/tools` | List all 22 available tools by category |
-| `/skills` | List all 10 available skills |
+| `/status` | System status: guards, budget, LLM calls, agents, scheduler |
+| `/health` | Run LLM health check for all configured models |
+| `/memory` | Memory overview: L1 session history, L2 skills, L3 long-term |
+| `/state` | Raw state JSON |
+| `/errors` | Error Learning stats: known errors, recent failures, avoidance count |
+| `/tools` | All 22 tools listed by category |
+| `/skills` | All 10 skills with descriptions |
 | `/reset` | Clear session memory and state |
-| `/evolve` | Run GEPA self-improvement analysis on the current session |
+| `/evolve` | GEPA self-improvement: analyze session, generate improvement proposals |
 | `/help` | Show all commands |
 
 ---
@@ -698,65 +818,51 @@ Available in CLI and Telegram:
 ```
 nexus-toti/
 │
-├── nexus.py                  # Entry point — CLI arg parsing, mode selection
-├── config.yaml               # All configuration (models, guards, scheduler, etc.)
+├── nexus.py                  # Entry point — arg parsing, mode selection
+├── config.yaml               # All configuration
 ├── requirements.txt          # Python dependencies
 ├── setup.sh                  # Interactive setup script
 ├── ollama_setup.py           # Ollama Cloud setup wizard
 │
-├── agents/                   # Agent implementations
+├── agents/
 │   ├── toti.py               # Primary agent — routing, delegation, commands
 │   ├── scout.py              # Research agent
-│   ├── forge.py              # Code/dev agent
-│   ├── lens.py               # Analysis/review agent
-│   ├── herald.py             # Output/docs agent
-│   ├── ghost.py              # Background/monitoring agent
+│   ├── forge.py              # Code / dev agent
+│   ├── lens.py               # Analysis / review agent
+│   ├── herald.py             # Output / docs agent
+│   ├── ghost.py              # Background / monitoring agent
 │   └── orchestrator.py       # DAG orchestration helper
 │
-├── core/                     # Core subsystems
+├── core/
 │   ├── agent_base.py         # Base class all agents inherit from
-│   ├── llm_client.py         # Multi-backend LLM client (Cloud/Local/z-ai)
-│   ├── memory.py             # 3-level memory system (L1/L2/L3)
+│   ├── llm_client.py         # Multi-backend LLM client
+│   ├── memory.py             # 3-level memory (L1 session / L2 skills / L3 longterm)
 │   ├── tools.py              # Tool registry and dispatch (22 tools)
-│   ├── delegation.py         # DAG task decomposition and execution
-│   ├── error_learning.py     # Error classification, warning, consolidation
-│   ├── guards.py             # Loop detection, max steps, budget tracking
+│   ├── delegation.py         # DAG task decomposition and parallel execution
+│   ├── error_learning.py     # Error record · warn · consolidate
+│   ├── guards.py             # Loop detection · max steps · budget tracking
 │   ├── scheduler.py          # Smart scheduler (4 trigger types)
 │   └── state.py              # Persistent state management
 │
-├── interfaces/               # User-facing interfaces
+├── interfaces/
 │   ├── cli.py                # Interactive Rich terminal CLI
-│   └── telegram_bot.py       # Telegram bot (per-user sessions)
+│   └── telegram_bot.py       # Telegram bot with per-user sessions
 │
-├── prompts/                  # System prompts for each agent
-│   ├── toti.txt              # Toti's full persona and capability prompt
-│   ├── scout.txt             # SCOUT research prompt
-│   ├── forge.txt             # FORGE coding prompt
-│   ├── lens.txt              # LENS analysis prompt
-│   ├── herald.txt            # HERALD output prompt
-│   └── ghost.txt             # GHOST background prompt
+├── prompts/                  # System prompts per agent
+│   ├── toti.txt
+│   ├── scout.txt
+│   ├── forge.txt
+│   ├── lens.txt
+│   ├── herald.txt
+│   └── ghost.txt
 │
-├── skills/                   # Skill modules (10 skills)
-│   ├── web_research.py
-│   ├── code_debug.py
-│   ├── code_review.py
-│   ├── security_scan.py
-│   ├── data_extract.py
-│   ├── test_gen.py
-│   ├── doc_gen.py
-│   ├── deploy_prep.py
-│   ├── dependency_check.py
-│   └── performance.py
+├── skills/                   # 10 skill modules
+│   └── *.py
 │
-├── memory/
-│   └── skills/               # Persistent skill patterns (JSON)
-│
-├── data/                     # Runtime data (gitignored)
-│   └── state/                # Per-session state files
-│
-├── Dockerfile                # Container build
-├── docker-compose.yml        # CLI + Telegram service definitions
-└── .env.example              # Environment variable template
+├── memory/skills/            # Persistent skill patterns (JSON)
+├── Dockerfile
+├── docker-compose.yml
+└── .env.example
 ```
 
 ---
@@ -765,16 +871,18 @@ nexus-toti/
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit your changes: `git commit -m "Add your feature"`
-4. Push to the branch: `git push origin feature/your-feature`
+3. Commit: `git commit -m "Add your feature"`
+4. Push: `git push origin feature/your-feature`
 5. Open a Pull Request
 
-**Extending NEXUS:**
+**Extension points:**
 
-- **New Tool** — Add a handler in `core/tools.py` and register it in `_register_defaults()`
-- **New Skill** — Create `skills/your_skill.py` with an `execute(llm_client, tools, **kwargs)` function
-- **New Agent** — Subclass `AgentBase`, set `AGENT_ID`, `SYSTEM_PROMPT_FILE`, and register in `nexus.py`
-- **New Trigger Type** — Extend `core/scheduler.py` with a new `ScheduledTask` subclass
+| What | Where | How |
+|------|-------|-----|
+| New Tool | `core/tools.py` | Add handler, register in `_register_defaults()` |
+| New Skill | `skills/your_skill.py` | Implement `execute(llm_client, tools, **kwargs)` |
+| New Agent | `agents/your_agent.py` | Subclass `AgentBase`, set `AGENT_ID` + `SYSTEM_PROMPT_FILE` |
+| New Trigger | `core/scheduler.py` | Extend `ScheduledTask` with new trigger logic |
 
 ---
 
