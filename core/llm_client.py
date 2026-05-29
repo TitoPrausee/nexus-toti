@@ -1,11 +1,12 @@
 """
-NEXUS LLM Client v3.0 — Ollama Cloud + Local + z-ai CLI
+NEXUS LLM Client v4.0 — Ollama Cloud + Local + z-ai CLI + qwen2.5:3b Fallback
 Per-Agent Model Routing mit optimaler Ollama Cloud Zuordnung.
 
-Supportet 3 Backends:
+Supportet 4 Backends:
   1. Ollama Cloud API (OpenAI-kompatibel mit Bearer Token)
   2. Lokaler Ollama Server (localhost:11434)
   3. z-ai CLI Fallback (GLM-4-Plus)
+  4. qwen2.5:3b Lokal-Fallback (wenn kein Modell konfiguriert/nicht funktioniert)
 
 Per-Agent Model Routing:
   NEXUS-0 (Orchestrator) → kimi-k2.6:cloud
@@ -16,12 +17,13 @@ Per-Agent Model Routing:
   GHOST  (Background)    → deepseek-v4-flash:cloud
 
 Features:
-  - Auto-Backend-Erkennung (Cloud → Local → z-ai)
+  - Auto-Backend-Erkennung (Cloud → Local → z-ai → qwen2.5:3b)
   - Per-Agent Temperatur und max_tokens
   - Health-Check für alle Modelle
   - Auto-Fallback bei Model-Ausfall
   - Budget-Tracking
   - Retry mit exponentiellem Backoff
+  - qwen2.5:3b als Notfall-Local-Fallback
 """
 
 import subprocess
@@ -208,8 +210,15 @@ class LLMClient:
 
         # Fallback-Modelle
         self._fallback_cloud = self._ollama_config.get("fallback_models", {}).get("cloud", "glm-5.1:cloud")
-        self._fallback_local = self._ollama_config.get("fallback_models", {}).get("local", "llama3.2:latest")
+        self._fallback_local = self._ollama_config.get("fallback_models", {}).get("local", "qwen2.5:3b")
         self._fallback_zai = self._ollama_config.get("fallback_models", {}).get("zai", "glm-4-plus")
+        self._fallback_emergency = self._ollama_config.get("fallback_models", {}).get("emergency", "qwen2.5:3b")
+
+        # qwen2.5:3b Emergency Fallback
+        self._emergency_model = "qwen2.5:3b"
+        self._emergency_available = self._check_emergency_model()
+        if self._active_backend == "none" and self._emergency_available:
+            self._active_backend = "ollama_emergency"
 
         # Health-Check
         if self._ollama_config.get("health_check_on_start", True):
@@ -278,6 +287,25 @@ class LLMClient:
             pass
         return False, None
 
+    def _check_emergency_model(self) -> bool:
+        """Prüfe ob qwen2.5:3b lokal verfügbar ist (Emergency Fallback)."""
+        if not REQUESTS_AVAILABLE:
+            return False
+        try:
+            resp = http_requests.get(f"{self._local_url}/api/tags", timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [m.get("name", "") for m in data.get("models", [])]
+                for m in models:
+                    if "qwen2.5" in m.lower() and "3b" in m.lower():
+                        return True
+                # Wenn lokaler Ollama läuft, können wir versuchen qwen2.5:3b zu pullen
+                if self._local_available:
+                    return True  # Ollama läuft, qwen2.5:3b könnte gepullt werden
+        except Exception:
+            pass
+        return False
+
     def _determine_backend(self) -> str:
         """Bestimme den aktiven Backend basierend auf Verfügbarkeit."""
         if self._mode == "cloud" and self._cloud_available:
@@ -298,6 +326,9 @@ class LLMClient:
             return "ollama_local"
         if self._zai_available:
             return "zai_cli"
+        # Emergency: qwen2.5:3b lokal
+        if self._emergency_available:
+            return "ollama_emergency"
         return "none"
 
     @property
@@ -420,6 +451,8 @@ class LLMClient:
             "cloud": self._cloud_available,
             "local": self._local_available,
             "zai_cli": self._zai_available,
+            "emergency": self._emergency_available,
+            "emergency_model": self._emergency_model,
             "api_key_set": bool(self._api_key),
         }
         return result
@@ -562,13 +595,44 @@ class LLMClient:
                 except Exception as e:
                     last_error = e
 
+            # 4. Versuch: Emergency qwen2.5:3b lokal
+            if self._emergency_available or self._local_available:
+                try:
+                    start = time.time()
+                    result = self._call_ollama_local(
+                        self._emergency_model,
+                        [Message(role="system", content=sys_prompt), Message(role="user", content=user_prompt)],
+                        temperature=temperature,
+                        max_tokens=min(max_tokens, 2048),  # Kleineres Modell → weniger tokens
+                    )
+                    elapsed = time.time() - start
+
+                    content = result.get("content", "")
+                    if content.strip():
+                        self._call_count += 1
+                        self._total_tokens += result.get("usage", {}).get("total_tokens", 0)
+                        self._update_health(agent_id, self._emergency_model, True, elapsed, "ollama_emergency")
+
+                        return LLMResponse(
+                            content=content,
+                            model=self._emergency_model,
+                            usage=result.get("usage", {}),
+                            raw=result,
+                            elapsed=elapsed,
+                            backend="ollama_emergency",
+                            agent_id=agent_id,
+                            fallback_used=True,
+                        )
+                except Exception as e:
+                    last_error = e
+
             # Retry warten
             if attempt < max_retries:
                 time.sleep(1 * attempt)
 
         self._last_error = str(last_error)
         return LLMResponse(
-            content=f"[LLM ERROR: {str(last_error)[:200]}]",
+            content=f"[LLM ERROR: Alle Backends fehlgeschlagen. Letzter Fehler: {str(last_error)[:200]}]",
             model="error",
             elapsed=0.0,
             backend="none",
@@ -895,6 +959,8 @@ class LLMClient:
             "cloud_available": self._cloud_available,
             "local_available": self._local_available,
             "zai_available": self._zai_available,
+            "emergency_available": self._emergency_available,
+            "emergency_model": self._emergency_model,
             "api_key_set": bool(self._api_key),
             "last_error": self._last_error,
             "agent_models": {

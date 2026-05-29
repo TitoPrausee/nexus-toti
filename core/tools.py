@@ -1,6 +1,6 @@
 """
-NEXUS Tool Registry & Dispatch System — Extended Developer Edition v2.0
-22 built-in tools: 6 base + 10 developer + 6 advanced
+NEXUS Tool Registry & Dispatch System — Extended Developer Edition v3.0
+32 built-in tools: 6 base + 10 developer + 6 advanced + 6 web + 4 vision
 
 BASE TOOLS (6):
   terminal, read_file, write_file, web_search, list_dir, code_exec
@@ -11,6 +11,12 @@ DEVELOPER TOOLS (10):
 
 ADVANCED TOOLS (6):
   db_query, api_test, code_lint, archive_ops, csv_ops, scheduler_tool
+
+WEB TOOLS (6):
+  web_browse, web_fetch, web_extract, web_links, web_download, web_screenshot
+
+VISION TOOLS (4):
+  vision_ocr, vision_analyze, vision_describe, vision_screenshot
 """
 
 import subprocess
@@ -170,6 +176,40 @@ class ToolRegistry:
                       self._tool_scheduler_tool,
                       {"action": "str", "task_id": "str", "trigger": "str", "interval_seconds": "int", "command": "str"},
                       category="general")
+
+        # ─── Web Tools (6) ───
+        self.register("web_browse", "Web-Suche via DuckDuckGo (kein API-Key nötig)",
+                      self._tool_web_browse,
+                      {"query": "str", "num": "int"}, category="web")
+        self.register("web_fetch", "URL-Content laden (HTML → Text)",
+                      self._tool_web_fetch,
+                      {"url": "str"}, category="web")
+        self.register("web_extract", "Lesbaren Text von einer URL extrahieren",
+                      self._tool_web_extract,
+                      {"url": "str"}, category="web")
+        self.register("web_links", "Links von einer Webseite extrahieren",
+                      self._tool_web_links,
+                      {"url": "str"}, category="web")
+        self.register("web_download", "Datei aus dem Internet herunterladen",
+                      self._tool_web_download,
+                      {"url": "str", "path": "str"}, category="web")
+        self.register("web_screenshot", "Screenshot einer URL machen (via Playwright)",
+                      self._tool_web_screenshot,
+                      {"url": "str", "width": "int", "height": "int"}, category="web")
+
+        # ─── Vision Tools (4) ───
+        self.register("vision_ocr", "OCR: Text aus einem Bild extrahieren (lokal oder URL)",
+                      self._tool_vision_ocr,
+                      {"path_or_url": "str", "lang": "str"}, category="vision")
+        self.register("vision_analyze", "Bild-Analyse: Metadaten, Farben, OCR",
+                      self._tool_vision_analyze,
+                      {"path_or_url": "str"}, category="vision")
+        self.register("vision_describe", "Bild-Beschreibung (ohne LLM, nur Metadaten + Farben)",
+                      self._tool_vision_describe,
+                      {"path_or_url": "str"}, category="vision")
+        self.register("vision_screenshot", "URL-Screenshot + Bildanalyse",
+                      self._tool_vision_screenshot,
+                      {"url": "str"}, category="vision")
 
     # ═══════════════════════════════════════════════════
     # BASE TOOL IMPLEMENTATIONS (6)
@@ -1233,3 +1273,81 @@ class ToolRegistry:
 
         except Exception as e:
             return {"error": str(e)}
+
+    # ═══════════════════════════════════════════════════
+    # WEB TOOL IMPLEMENTATIONS (6)
+    # ═══════════════════════════════════════════════════
+
+    @staticmethod
+    def _tool_web_browse(query: str, num: int = 8) -> dict:
+        """Web-Suche via DuckDuckGo (kein API-Key nötig)."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.search(query, num)
+
+    @staticmethod
+    def _tool_web_fetch(url: str) -> dict:
+        """URL-Content laden."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.fetch(url)
+
+    @staticmethod
+    def _tool_web_extract(url: str) -> dict:
+        """Lesbaren Text von einer URL extrahieren."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.extract_text(url)
+
+    @staticmethod
+    def _tool_web_links(url: str) -> dict:
+        """Links von einer Webseite extrahieren."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.extract_links(url)
+
+    @staticmethod
+    def _tool_web_download(url: str, path: str = "") -> dict:
+        """Datei aus dem Internet herunterladen."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.download(url, path)
+
+    @staticmethod
+    def _tool_web_screenshot(url: str, width: int = 1280, height: int = 720) -> dict:
+        """Screenshot einer URL machen (via Playwright)."""
+        from core.web_browser import WebBrowser
+        browser = WebBrowser()
+        return browser.screenshot(url, width, height)
+
+    # ═══════════════════════════════════════════════════
+    # VISION TOOL IMPLEMENTATIONS (4)
+    # ═══════════════════════════════════════════════════
+
+    @staticmethod
+    def _tool_vision_ocr(path_or_url: str, lang: str = "deu+eng") -> dict:
+        """OCR: Text aus einem Bild extrahieren."""
+        from core.vision import VisionSystem
+        vs = VisionSystem()
+        return vs.ocr(path_or_url, lang)
+
+    @staticmethod
+    def _tool_vision_analyze(path_or_url: str) -> dict:
+        """Bild-Analyse: Metadaten, Farben, OCR."""
+        from core.vision import VisionSystem
+        vs = VisionSystem()
+        return vs.analyze_image(path_or_url)
+
+    @staticmethod
+    def _tool_vision_describe(path_or_url: str) -> dict:
+        """Bild-Beschreibung (ohne LLM, nur Metadaten + Farben)."""
+        from core.vision import VisionSystem
+        vs = VisionSystem()
+        return vs.describe(path_or_url)
+
+    @staticmethod
+    def _tool_vision_screenshot(url: str) -> dict:
+        """URL-Screenshot + Bildanalyse."""
+        from core.vision import VisionSystem
+        vs = VisionSystem()
+        return vs.screenshot_and_analyze(url)

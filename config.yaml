@@ -1,5 +1,6 @@
-# NEXUS Toti Agent System Configuration v3.0
+# NEXUS Toti Agent System Configuration v4.0
 # Ollama Cloud Integration · Per-Agent Model Routing · Error Learning
+# Web Browser · Vision System · Activity Bus · IQ Drive
 
 # ═══════════════════════════════════════════════════════════
 # OLLAMA CLOUD CONFIGURATION
@@ -58,8 +59,9 @@ ollama:
   # Fallback-Modelle (wenn Cloud nicht verfügbar)
   fallback_models:
     cloud: "glm-5.1:cloud"             # Universal-Fallback Cloud
-    local: "llama3.2:latest"           # Universal-Fallback Local
-    zai: "glm-4-plus"                  # z-ai CLI Fallback
+    local: "qwen2.5:3b"                # Universal-Fallback Local
+    zai: "glm-4-plus"                   # z-ai CLI Fallback
+    emergency: "qwen2.5:3b"            # NOTFALL: Wird genutzt wenn kein anderes Modell funktioniert
 
   # Health & Auto-Verify
   health_check_on_start: true          # Modelle beim Start testen
@@ -84,6 +86,7 @@ toti:
   confidence_threshold: 0.5
   error_learning: true
   auto_avoid: true
+  iq_drive_active: true                 # Toti will ständig seinen IQ erhöhen
 
 # ═══════════════════════════════════════════════════════════
 # MEMORY
@@ -94,6 +97,74 @@ memory:
   auto_save: true
   rolling_summary_max: 300
   last_output_max: 200
+
+# ═══════════════════════════════════════════════════════════
+# WEB BROWSER — Freier Internet-Zugriff
+# ═══════════════════════════════════════════════════════════
+web:
+  enabled: true                         # Toti darf aufs Internet
+  min_request_interval: 0.5            # Rate-Limit (Sekunden zwischen Requests)
+  max_content_size: 2000000            # Max Content-Size (2MB)
+  timeout: 30                           # Request-Timeout (Sekunden)
+  search_engine: "duckduckgo"          # duckduckgo (kein API-Key nötig)
+  respect_robots_txt: true
+  user_agent: "NEXUS-Toti/4.0"
+
+# ═══════════════════════════════════════════════════════════
+# VISION — Bild-Analyse (auch ohne Vision-LLM)
+# ═══════════════════════════════════════════════════════════
+vision:
+  enabled: true                         # Vision aktiviert
+  ocr_language: "deu+eng"              # OCR-Sprache (Deutsch + Englisch)
+  use_llm_vision: true                  # Falls LLM Vision hat → nutzen
+  fallback_to_ocr: true                 # Ohne Vision-LLM → OCR nutzen
+  max_image_size: 10000000             # Max Bildgröße (10MB)
+  screenshot_width: 1280
+  screenshot_height: 720
+
+# ═══════════════════════════════════════════════════════════
+# ACTIVITY BUS — Echtzeit-Event-System
+# ═══════════════════════════════════════════════════════════
+activity_bus:
+  enabled: true                         # Activity Bus aktiviert
+  max_history: 100                      # Letzte N Events behalten
+  notify_on:
+    - tool_call
+    - save
+    - cron_start
+    - cron_done
+    - self_optimize
+    - soul_edit
+    - memory_edit
+    - file_edit
+    - config_edit
+    - iq_change
+    - error_learned
+    - error_avoided
+    - web_access
+    - vision_analyze
+
+# ═══════════════════════════════════════════════════════════
+# IQ SYSTEM — Toti will ständig schlauer werden
+# ═══════════════════════════════════════════════════════════
+iq:
+  start_value: 100
+  rewards:
+    tool_success: 0.5
+    error_avoided: 1.0
+    self_optimize: 2.0
+    new_skill: 3.0
+    web_success: 0.5
+    vision_success: 0.5
+    complex_task: 1.5
+    simple_answer: 0.2
+  penalties:
+    error: -1.0
+    loop_detected: -2.0
+    web_fail: -0.5
+    vision_fail: -0.5
+  min_iq: 50
+  xp_per_level: 100
 
 # ═══════════════════════════════════════════════════════════
 # SMART SCHEDULER
@@ -152,12 +223,14 @@ agents:
     skills: [deploy_prep, dependency_check]
 
 # ═══════════════════════════════════════════════════════════
-# TOOLS (22 Tools)
+# TOOLS (28+ Tools: 6 base + 10 developer + 6 advanced + 6 web/vision)
 # ═══════════════════════════════════════════════════════════
 tools:
   base: [terminal, read_file, write_file, web_search, list_dir, code_exec]
   developer: [git, docker, pkg_install, http_request, file_search, process_manager, env_check, port_check, json_yaml, file_ops]
   advanced: [db_query, api_test, code_lint, archive_ops, csv_ops, scheduler_tool]
+  web: [web_browse, web_fetch, web_extract, web_links, web_download, web_screenshot]
+  vision: [vision_ocr, vision_analyze, vision_describe, vision_screenshot]
   dangerous_requires_confirmation: false
 
 # ═══════════════════════════════════════════════════════════
@@ -167,6 +240,11 @@ telegram:
   enabled: false
   token: ""
   authorized_users: []
+  typing_indicator: true               # Zeigt "Typing..." wenn Bot arbeitet
+  live_updates: true                   # Echtzeit-Statusmeldungen
+  emoji_mode: true                     # Emojis in allen Nachrichten
+  code_blocks: true                    # Code in Codeboxen
+  max_message_length: 4000
 
 # ═══════════════════════════════════════════════════════════
 # CLI
