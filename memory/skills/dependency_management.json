@@ -1,0 +1,14 @@
+{
+  "pattern": "TOOL:pkg_install + TOOL:read_file(requirements/package.json). TOOL:terminal for audits.",
+  "description": "Manage dependencies: install, update, audit, resolve conflicts",
+  "agent": "FORGE",
+  "tools": [
+    "pkg_install",
+    "read_file",
+    "write_file",
+    "terminal",
+    "file_search"
+  ],
+  "updated": 1780053326.9830365,
+  "version": "2.0"
+}

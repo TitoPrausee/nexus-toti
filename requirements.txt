@@ -1,0 +1,6 @@
+# NEXUS Toti Agent System - Python Dependencies
+rich>=13.0.0
+pyyaml>=6.0
+
+# Telegram (optional — only for --telegram mode):
+# python-telegram-bot>=20.0

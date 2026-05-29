@@ -1,0 +1,11 @@
+{
+  "pattern": "GHOST + state_persistence. Load checkpoint, resume from last known state.",
+  "description": "Crash recovery from checkpoint — resume where you left off",
+  "agent": "GHOST",
+  "tools": [
+    "read_file",
+    "write_file"
+  ],
+  "updated": 1780053326.982456,
+  "version": "2.0"
+}

@@ -1,0 +1,14 @@
+{
+  "pattern": "FORGE creates pipeline files. TOOL:git + TOOL:terminal for validation.",
+  "description": "Set up CI/CD pipelines: GitHub Actions, GitLab CI, Docker builds",
+  "agent": "FORGE",
+  "tools": [
+    "git",
+    "write_file",
+    "terminal",
+    "docker",
+    "env_check"
+  ],
+  "updated": 1780053326.9828198,
+  "version": "2.0"
+}

@@ -1,0 +1,101 @@
+# NEXUS Toti Agent System Configuration v2.0
+# Mit Error-Learning, LLM-Health, 22 Tools, 10 Skills
+
+# Ollama Model Configuration
+model:
+  default_level: 2  # 0=rules, 1=fast, 2=standard, 3=thinking
+  max_retries: 2
+  auto_fallback: true
+  health_check_on_start: true
+  # Modell via Env-Var ueberschreibbar: NEXUS_MODEL_STANDARD=qwen2.5:7b
+  ollama_model: "qwen2.5:3b"
+  ollama_host: "http://localhost:11434"
+
+# Toti Agent
+toti:
+  personality_active: true
+  max_steps: 10
+  confidence_threshold: 0.5  # Below this → ask user
+  error_learning: true  # Selbst-Fehlererkennung aktiv
+  auto_avoid: true  # Bekannte Fehler automatisch vermeiden
+
+# Memory
+memory:
+  base_dir: "memory"
+  max_session_history: 100
+  auto_save: true
+  rolling_summary_max: 300  # chars
+  last_output_max: 200  # chars
+
+# Smart Scheduler
+scheduler:
+  enabled: true
+  default_tasks:
+    state_persist:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 60
+    memory_compress:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 300
+    error_consolidate:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 600
+    log_cleanup:
+      trigger: CHANGE_TRIGGER
+      watch: "data/state/"
+
+# Safety Guards
+guards:
+  max_steps: 10
+  budget_limit_pct: 90.0
+  loop_detection_window: 3
+  action_loop_window: 5
+
+# Error Learning
+error_learning:
+  enabled: true
+  max_error_age_days: 7  # Alte Fehler nach X Tagen löschen
+  auto_consolidate: true
+  similarity_threshold: 0.3  # Ab wann ist ein Fehler "ähnlich"
+
+# Sub-Agents
+agents:
+  SCOUT:
+    model_level: 1
+    min_sources: 2
+    skills: [web_research, data_extract]
+  FORGE:
+    model_level: 2
+    test_before_done: true
+    skills: [code_debug, code_review, test_gen, doc_gen]
+  LENS:
+    model_level: 2
+    pareto_threshold: 0.2
+    skills: [code_review, security_scan, performance, dependency_check]
+  HERALD:
+    model_level: 1
+    skills: [doc_gen]
+  GHOST:
+    model_level: 0  # Always local
+    stuck_threshold: 3
+    pattern_threshold: 3
+    skills: [deploy_prep, dependency_check]
+
+# Tools Configuration (22 Tools)
+tools:
+  base: [terminal, read_file, write_file, web_search, list_dir, code_exec]
+  developer: [git, docker, pkg_install, http_request, file_search, process_manager, env_check, port_check, json_yaml, file_ops]
+  advanced: [db_query, api_test, code_lint, archive_ops, csv_ops, scheduler_tool]
+  dangerous_requires_confirmation: false  # Toti handelt autonom
+
+# Telegram
+telegram:
+  enabled: false
+  token: ""  # NEXUS_TG_TOKEN env var
+  authorized_users: []
+
+# CLI
+cli:
+  rich_output: true
+  prompt: "Toti >"
+  health_check_on_start: true
