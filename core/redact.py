@@ -11,7 +11,7 @@ Usage:
     from core.redact import redact_secrets, redact_text
 
     # Redact a string
-    safe = redact_text("My API key is sk-abc123def456")
+    safe = redact_text("My API key is ***")
     # → "My API key is sk-***"
 
     # Check if text contains secrets
@@ -36,7 +36,7 @@ API_KEY_PATTERNS = [
     # OpenAI
     (r"sk-[a-zA-Z0-9]{20,}", "sk-***"),
     # Anthropic
-    (r"sk-ant-api03-[a-zA-Z0-9]{20,}", "sk-ant-***"),
+    (r"sk-ant-[a-zA-Z0-9]{20,}", "sk-ant-***"),
     # GitHub
     (r"ghp_[a-zA-Z0-9]{36,}", "ghp_***"),
     (r"github_pat_[a-zA-Z0-9_]{22,}", "github_pat_***"),
@@ -77,85 +77,78 @@ _URL_QUERY_PATTERN = re.compile(
 # ── Regex for JSON body redaction ────────────────────────────────────
 
 _JSON_BODY_PATTERN = re.compile(
-    r'[\"\\']?(' + "|".join(re.escape(k) for k in SENSITIVE_BODY_KEYS) + r')['\"\\']?\\s*:\\s*[\"\\']?([a-zA-Z0-9\\-._~+/]{8,})[\"\\']?',
+    r"""["']?(""" + "|".join(re.escape(k) for k in SENSITIVE_BODY_KEYS) + r""")["']?\s*:\s*["']?([a-zA-Z0-9\-._~+/]{8,})["']?""",
     re.IGNORECASE,
 )
 
 # ── Environment Variable Leaks ──────────────────────────────────────
 
 _ENV_VAR_PATTERN = re.compile(
-    r"(?:(?:export|set|SET)\\s+)?([A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL|AUTH)[A-Z0-9_]*)\\s*=\\s*[\"\\']?([a-zA-Z0-9\\-._~+/]{8,})[\"\\']?",
+    r"""(?:(?:export|set|SET)\s+)?([A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL|AUTH)[A-Z0-9_]*)\s*=\s*["']?([a-zA-Z0-9\-._~+/]{8,})["']?""",
     re.IGNORECASE,
 )
 
-# ── Compiled patterns ───────────────────────────────────────────────
+# ── Combined pattern for quick detection ─────────────────────────────
 
-_COMPILED_API_KEY_PATTERNS = [
-    (re.compile(p, re.IGNORECASE), replacement)
-    for p, replacement in API_KEY_PATTERNS
-]
+_QUICK_SECRET_PATTERN = re.compile(
+    r"(?:sk-|sk-ant-|ghp_|github_pat_|ollama-|hf_|AIza|Bearer\s+|api[_-]?key\s*[:=]|secret\s*[:=]|password\s*[:=]|token\s*[:=])",
+    re.IGNORECASE,
+)
 
 
 def redact_text(text: str) -> str:
-    """
-    Redact secrets from a text string.
-
-    Replaces API keys, tokens, passwords, and other sensitive values
-    with '***' markers.
-    """
+    """Redact secrets from a text string."""
     if not _REDACT_ENABLED or not text:
         return text
 
     result = text
 
-    # 1. API key patterns (most specific first)
-    for pattern, replacement in _COMPILED_API_KEY_PATTERNS:
+    # API key patterns (most specific first)
+    for pattern, replacement in API_KEY_PATTERNS:
         if callable(replacement):
-            result = pattern.sub(replacement, result)
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
         else:
-            result = pattern.sub(replacement, result)
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
 
-    # 2. URL query-string params
-    result = _URL_QUERY_PATTERN.sub(r"\1\2=***", result)
+    # URL query parameters
+    result = _URL_QUERY_PATTERN.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}=***", result
+    )
 
-    # 3. JSON body values
-    result = _JSON_BODY_PATTERN.sub(lambda m: m.group(0).replace(m.group(2), "***"), result)
+    # JSON body patterns
+    result = _JSON_BODY_PATTERN.sub(
+        lambda m: m.group(0).replace(m.group(2), "***"), result
+    )
 
-    # 4. Environment variable assignments
-    result = _ENV_VAR_PATTERN.sub(lambda m: m.group(0).replace(m.group(2), "***"), result)
+    # Environment variable leaks
+    result = _ENV_VAR_PATTERN.sub(
+        lambda m: m.group(0).replace(m.group(2), "***"), result
+    )
 
     return result
 
 
 def contains_secrets(text: str) -> bool:
-    """Check if text likely contains secrets (without modifying it)."""
+    """Check if text likely contains secrets without full redaction."""
     if not text:
         return False
-
-    for pattern, _ in _COMPILED_API_KEY_PATTERNS:
-        if pattern.search(text):
+    # Quick check first
+    if _QUICK_SECRET_PATTERN.search(text):
+        return True
+    # Full patterns
+    for pattern, _ in API_KEY_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
             return True
-
-    if _URL_QUERY_PATTERN.search(text):
+    if _URL_QUERY_PATTERN.search(text) or _JSON_BODY_PATTERN.search(text):
         return True
-
-    if _JSON_BODY_PATTERN.search(text):
-        return True
-
     if _ENV_VAR_PATTERN.search(text):
         return True
-
     return False
 
 
 def redact_dict(data: dict, max_depth: int = 10) -> dict:
-    """
-    Recursively redact secrets in a dictionary.
-
-    Walks nested dicts and lists, redacting any string values
-    that contain secrets.
-    """
-    if max_depth <= 0:
+    """Redact secrets from a dictionary (e.g., tool results, config)."""
+    if not _REDACT_ENABLED or max_depth <= 0:
         return data
 
     if not isinstance(data, dict):
@@ -163,44 +156,61 @@ def redact_dict(data: dict, max_depth: int = 10) -> dict:
 
     result = {}
     for key, value in data.items():
+        str_key = str(key).lower()
         if isinstance(value, str):
-            # Check if key itself is sensitive
-            if isinstance(key, str) and key.lower() in SENSITIVE_BODY_KEYS:
-                result[key] = "***"
-            elif contains_secrets(value):
-                result[key] = redact_text(value)
+            if str_key in SENSITIVE_BODY_KEYS or any(
+                kw in str_key for kw in ("token", "key", "secret", "password", "credential", "auth")
+            ):
+                result[key] = "***" if len(value) > 4 else "***"
             else:
-                result[key] = value
+                result[key] = redact_text(value)
         elif isinstance(value, dict):
             result[key] = redact_dict(value, max_depth - 1)
         elif isinstance(value, list):
             result[key] = [
-                redact_dict(item, max_depth - 1) if isinstance(item, dict)
-                else redact_text(item) if isinstance(item, str) and contains_secrets(item)
+                redact_text(item) if isinstance(item, str)
+                else redact_dict(item, max_depth - 1) if isinstance(item, dict)
                 else item
                 for item in value
             ]
         else:
             result[key] = value
-
     return result
 
 
-def redact_tool_output(output: str, max_length: int = 10000) -> str:
-    """
-    Redact secrets from tool output, also truncating if too long.
+def redact_tool_output(output: str) -> str:
+    """Redact secrets from tool output, preserving structure."""
+    return redact_text(output)
 
-    Combines secret redaction with length truncation for safe
-    inclusion in conversation history.
-    """
-    if not output:
-        return output
 
-    # First redact
-    result = redact_text(output)
+# ── Telegram-specific redaction ──────────────────────────────────────
 
-    # Then truncate if needed
-    if len(result) > max_length:
-        result = result[:max_length] + f"\n... [truncated, {len(result) - max_length} chars omitted]"
+_TELEGRAM_PATTERNS = [
+    # Telegram bot tokens (123456:ABC-DEF...)
+    (r"\d{8,10}:[a-zA-Z0-9\-_]{30,}", "***:***"),
+    # Chat IDs (negative numbers)
+    (r"(?<=chat_id[=:]\s*)\-?\d{8,}", "***"),
+]
 
+
+def redact_telegram(text: str) -> str:
+    """Extra redaction for Telegram-specific patterns."""
+    result = redact_text(text)
+    for pattern, replacement in _TELEGRAM_PATTERNS:
+        result = re.sub(pattern, replacement, result)
     return result
+
+
+# ── Export ──────────────────────────────────────────────────────────
+
+__all__ = [
+    "redact_text",
+    "contains_secrets",
+    "redact_dict",
+    "redact_tool_output",
+    "redact_telegram",
+    "API_KEY_PATTERNS",
+    "SENSITIVE_QUERY_PARAMS",
+    "SENSITIVE_BODY_KEYS",
+    "_REDACT_ENABLED",
+]
