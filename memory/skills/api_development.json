@@ -1,0 +1,13 @@
+{
+  "pattern": "FORGE + TOOL:http_request for testing. Define endpoints → implement → test → document",
+  "description": "Build REST APIs: define routes, implement handlers, test endpoints, generate docs",
+  "agent": "FORGE",
+  "tools": [
+    "write_file",
+    "code_exec",
+    "http_request",
+    "terminal"
+  ],
+  "updated": 1780053326.982497,
+  "version": "2.0"
+}

@@ -1,0 +1,23 @@
+# NEXUS Toti Agent System v5.0 - Python Dependencies
+
+# Core
+rich>=13.0.0
+pyyaml>=6.0
+requests>=2.31.0
+
+# Web Browser (freier Internet-Zugriff)
+beautifulsoup4>=4.12.0
+duckduckgo-search>=4.0.0
+
+# Vision System (z-ai VLM + OCR + Bildanalyse)
+Pillow>=10.0.0
+pytesseract>=0.3.10
+
+# RAG System (TF-IDF Retrieval — keine Vector DB nötig)
+# Alle Abhängigkeiten sind Standard-Bibliothek (json, math, re, os)
+
+# Playwright (optional — für Screenshots, install: playwright install chromium)
+# playwright>=1.40.0
+
+# Telegram (optional — only for --telegram mode):
+# python-telegram-bot>=20.0

@@ -1,0 +1,12 @@
+{
+  "pattern": "LENS + devil_advocate + failure_mode_analysis + TOOL:read_file",
+  "description": "Critical code review with structured PASS/FAIL verdict",
+  "agent": "LENS",
+  "tools": [
+    "read_file",
+    "terminal",
+    "code_exec"
+  ],
+  "updated": 1780053326.9823513,
+  "version": "2.0"
+}

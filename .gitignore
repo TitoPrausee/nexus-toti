@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+data/
+memory/sessions/
+memory/longterm/
+.DS_Store

@@ -1,0 +1,14 @@
+{
+  "pattern": "TOOL:docker + TOOL:write_file(Dockerfile/compose). TOOL:env_check for compatibility.",
+  "description": "Containerize applications: Dockerfiles, compose, multi-stage builds",
+  "agent": "FORGE",
+  "tools": [
+    "docker",
+    "write_file",
+    "terminal",
+    "env_check",
+    "file_ops"
+  ],
+  "updated": 1780053326.9829981,
+  "version": "2.0"
+}
