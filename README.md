@@ -1,6 +1,6 @@
-# NEXUS — Toti Agent System v3.0
+# NEXUS — Toti Agent System
 
-> Autonomous multi-agent framework powered by Ollama Cloud · Per-agent model routing · Error Learning · 22 Tools · 10 Skills · Telegram Interface
+> Autonomous multi-agent framework powered by Ollama Cloud · Per-agent model routing · Error Learning · 44 Tools · 10 Skills · RAG · ReAct · Telegram Interface
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -77,7 +77,7 @@ graph TB
 
     subgraph Core["Core Subsystems"]
         MEM["Memory<br/>L1 / L2 / L3"]
-        TOOLS["Tools<br/>22 built-in"]
+        TOOLS["Tools<br/>44 built-in"]
         SKILLS["Skills<br/>10 modules"]
         GUARDS["Safety Guards<br/>Loop · Steps · Budget"]
         SCHED["Smart Scheduler<br/>4 Trigger Types"]
@@ -575,7 +575,7 @@ classDiagram
 
 ## Tool Registry
 
-22 built-in tools dispatched via `TOOL:name(params)` syntax in LLM output.
+44 built-in tools dispatched via `TOOL:name(params)` syntax in LLM output.
 
 <details>
 <summary><strong>Base Tools — 6 (click to expand)</strong></summary>
