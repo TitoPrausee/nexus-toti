@@ -1,0 +1,14 @@
+{
+  "pattern": "FORGE generates from templates. TOOL:write_file + TOOL:file_ops(mkdir). TOOL:pkg_install.",
+  "description": "Scaffold new projects: create structure, install deps, set up configs",
+  "agent": "FORGE",
+  "tools": [
+    "write_file",
+    "file_ops",
+    "pkg_install",
+    "terminal",
+    "env_check"
+  ],
+  "updated": 1780053326.9829233,
+  "version": "2.0"
+}

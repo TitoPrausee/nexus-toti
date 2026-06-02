@@ -1,0 +1,310 @@
+# NEXUS Toti Agent System Configuration v5.0
+# Ollama Cloud · z.ai CLI · Per-Agent Model Routing · Error Learning
+# Web Browser · Vision System (z-ai VLM + OCR) · Activity Bus · IQ Drive
+# RAG · ReAct Loop · Self-Reflection · Planning · AI Media (Image/Video/TTS/ASR)
+
+# ═══════════════════════════════════════════════════════════
+# OLLAMA CLOUD CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+ollama:
+  # API Configuration
+  base_url: "https://api.ollama.ai"    # Ollama Cloud API
+  local_url: "http://localhost:11434"   # Lokaler Ollama Server
+  api_key: ""                           # OLLAMA_API_KEY env var oder hier eintragen
+  mode: "cloud"                         # "cloud" | "local" | "hybrid" (cloud优先, local fallback)
+
+  # Per-Agent Modell-Zuordnung — Optimal für Ollama Cloud
+  agent_models:
+    NEXUS-0:
+      model: "kimi-k2.6:cloud"
+      description: "Orchestrator — Beste Balance für agentisches Coding, 87/100 Tier-A"
+      pull_cmd: "ollama pull kimi-k2.6:cloud"
+      temperature: 0.7
+      max_tokens: 4096
+
+    SCOUT:
+      model: "glm-5.1:cloud"
+      description: "Recherche — 744B Parameter, optimiert für Systems Engineering"
+      pull_cmd: "ollama pull glm-5.1:cloud"
+      temperature: 0.5
+      max_tokens: 8192
+
+    FORGE:
+      model: "qwen3-coder-next:cloud"
+      description: "Coding — Bestes Coding-Modell im Ollama-Ökosystem"
+      pull_cmd: "ollama pull qwen3-coder-next:cloud"
+      temperature: 0.3
+      max_tokens: 8192
+
+    LENS:
+      model: "kimi-k2.6:cloud"
+      description: "Analyse — Herausragend bei Research und Reasoning"
+      pull_cmd: "ollama pull kimi-k2.6:cloud"
+      temperature: 0.4
+      max_tokens: 4096
+
+    HERALD:
+      model: "minimax-m2.7:cloud"
+      description: "Output — Stark bei langen, stabilen Sessions"
+      pull_cmd: "ollama pull minimax-m2.7:cloud"
+      temperature: 0.6
+      max_tokens: 4096
+
+    GHOST:
+      model: "deepseek-v4-flash:cloud"
+      description: "Background — Günstigster Cloud-Slot, reicht für Monitoring"
+      pull_cmd: "ollama pull deepseek-v4-flash:cloud"
+      temperature: 0.3
+      max_tokens: 2048
+
+  # Fallback-Modelle (wenn Cloud nicht verfügbar)
+  fallback_models:
+    cloud: "glm-5.1:cloud"             # Universal-Fallback Cloud
+    local: "qwen2.5:3b"                # Universal-Fallback Local
+    zai: "glm-4-plus"                   # z-ai CLI Fallback
+    emergency: "qwen2.5:3b"            # NOTFALL: Wird genutzt wenn kein anderes Modell funktioniert
+
+  # Health & Auto-Verify
+  health_check_on_start: true          # Modelle beim Start testen
+  verify_response: true                # Teste dass Modelle tatsächlich antworten
+  auto_fallback: true                  # Automatisch auf Fallback wechseln
+  max_retries: 2                       # Max Retry pro Call
+  auto_pull_emergency: true            # qwen2.5:3b automatisch pullen wenn nötig
+
+# ═══════════════════════════════════════════════════════════
+# z.ai CLI INTEGRATION — Vollständige 9-Befehl-Anbindung
+# ═══════════════════════════════════════════════════════════
+zai:
+  enabled: true                         # z-ai CLI Integration aktivieren
+  cli_path: "/usr/local/bin/z-ai"       # Pfad zur z-ai CLI
+  # Befehle: chat, vision, tts, asr, image, image-edit, image-search, video, function
+  defaults:
+    image_size: "1024x1024"             # Standard Bildgröße für Generierung
+    tts_voice: "tongtong"               # Stimme für Text-to-Speech
+    tts_format: "wav"                   # Audio-Format (wav, mp3)
+    tts_speed: 1.0                      # Sprechgeschwindigkeit (0.5-2.0)
+    video_quality: "speed"              # Video-Qualität (speed, quality)
+    video_duration: 5                   # Video-Dauer in Sekunden (5 oder 10)
+    video_fps: 30                       # Video FPS (30 oder 60)
+    image_search_count: 5               # Anzahl Bilder bei Bildersuche
+    image_search_region: "de"           # Region für Bildersuche (de, cn, us)
+
+# ═══════════════════════════════════════════════════════════
+# LEGACY GLM CONFIGURATION (z-ai CLI Fallback)
+# ═══════════════════════════════════════════════════════════
+model:
+  default_level: 2                     # 0=rules, 1=fast, 2=standard, 3=thinking
+  max_retries: 2
+  auto_fallback: true
+
+# ═══════════════════════════════════════════════════════════
+# TOTI AGENT — v5.0 mit ReAct + Planning + RAG
+# ═══════════════════════════════════════════════════════════
+toti:
+  personality_active: true
+  max_steps: 10
+  confidence_threshold: 0.5
+  error_learning: true
+  auto_avoid: true
+  iq_drive_active: true                 # Toti will ständig seinen IQ erhöhen
+  react_mode: true                      # ReAct Loop für komplexe Tasks
+  react_max_steps: 5                    # Max ReAct Iterationen
+  planning_enabled: true                # Task-Planning aktivieren
+  reflection_enabled: true              # Self-Reflection aktivieren
+  auto_reflect_threshold: 0.6          # Qualitätsschwelle für Auto-Reflexion
+
+# ═══════════════════════════════════════════════════════════
+# MEMORY
+# ═══════════════════════════════════════════════════════════
+memory:
+  base_dir: "memory"
+  max_session_history: 100
+  auto_save: true
+  rolling_summary_max: 300
+  last_output_max: 200
+
+# ═══════════════════════════════════════════════════════════
+# RAG — Retrieval Augmented Generation (Hermes-Aspekt)
+# ═══════════════════════════════════════════════════════════
+rag:
+  enabled: true                         # RAG System aktivieren
+  storage_dir: "data/rag"              # Verzeichnis für RAG-Daten
+  chunk_size: 500                       # Zeichen pro Chunk
+  chunk_overlap: 50                     # Überlappung zwischen Chunks
+  max_chunks: 5000                      # Maximale Anzahl Chunks
+  top_k: 5                             # Anzahl Results pro Suche
+  max_context_tokens: 2000              # Max Tokens für RAG-Context
+
+# ═══════════════════════════════════════════════════════════
+# WEB BROWSER — Freier Internet-Zugriff
+# ═══════════════════════════════════════════════════════════
+web:
+  enabled: true                         # Toti darf aufs Internet
+  min_request_interval: 0.5            # Rate-Limit (Sekunden zwischen Requests)
+  max_content_size: 2000000            # Max Content-Size (2MB)
+  timeout: 30                           # Request-Timeout (Sekunden)
+  search_engine: "duckduckgo"          # duckduckgo (kein API-Key nötig)
+  respect_robots_txt: true
+  user_agent: "NEXUS-Toti/5.0"
+
+# ═══════════════════════════════════════════════════════════
+# VISION — z-ai VLM + OCR + Bildanalyse
+# ═══════════════════════════════════════════════════════════
+vision:
+  enabled: true                         # Vision aktiviert
+  priority: "zai_vlm"                   # "zai_vlm" | "ollama_vision" | "ocr" | "metadata"
+  ocr_language: "deu+eng"              # OCR-Sprache (Deutsch + Englisch)
+  use_llm_vision: true                  # Falls LLM Vision hat → nutzen
+  fallback_to_ocr: true                 # Ohne Vision-LLM → OCR nutzen
+  max_image_size: 10000000             # Max Bildgröße (10MB)
+  screenshot_width: 1280
+  screenshot_height: 720
+
+# ═══════════════════════════════════════════════════════════
+# ACTIVITY BUS — Echtzeit-Event-System
+# ═══════════════════════════════════════════════════════════
+activity_bus:
+  enabled: true                         # Activity Bus aktiviert
+  max_history: 100                      # Letzte N Events behalten
+  notify_on:
+    - tool_call
+    - save
+    - cron_start
+    - cron_done
+    - self_optimize
+    - soul_edit
+    - memory_edit
+    - file_edit
+    - config_edit
+    - iq_change
+    - error_learned
+    - error_avoided
+    - web_access
+    - vision_analyze
+    - rag_ingest
+    - rag_search
+    - react_step
+    - plan_created
+    - ai_media_generated
+
+# ═══════════════════════════════════════════════════════════
+# IQ SYSTEM — Toti will ständig schlauer werden
+# ═══════════════════════════════════════════════════════════
+iq:
+  start_value: 100
+  rewards:
+    tool_success: 0.5
+    error_avoided: 1.0
+    self_optimize: 2.0
+    new_skill: 3.0
+    web_success: 0.5
+    vision_success: 0.5
+    complex_task: 1.5
+    simple_answer: 0.2
+    react_success: 1.0                 # ReAct Loop erfolgreich
+    rag_ingest: 0.3                    # Wissen in RAG aufgenommen
+    plan_success: 1.0                  # Plan erfolgreich ausgeführt
+    ai_media_success: 0.5              # AI Bild/Video/Audio erstellt
+  penalties:
+    error: -1.0
+    loop_detected: -2.0
+    web_fail: -0.5
+    vision_fail: -0.5
+    react_fail: -0.5                   # ReAct Loop gescheitert
+  min_iq: 50
+  xp_per_level: 100
+
+# ═══════════════════════════════════════════════════════════
+# SMART SCHEDULER
+# ═══════════════════════════════════════════════════════════
+scheduler:
+  enabled: true
+  default_tasks:
+    state_persist:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 60
+    memory_compress:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 300
+    error_consolidate:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 600
+    rag_save:
+      trigger: INTERVAL_TRIGGER
+      interval_seconds: 300
+    log_cleanup:
+      trigger: CHANGE_TRIGGER
+      watch: "data/state/"
+
+# ═══════════════════════════════════════════════════════════
+# SAFETY GUARDS
+# ═══════════════════════════════════════════════════════════
+guards:
+  max_steps: 10
+  budget_limit_pct: 90.0
+  loop_detection_window: 3
+  action_loop_window: 5
+
+# ═══════════════════════════════════════════════════════════
+# ERROR LEARNING
+# ═══════════════════════════════════════════════════════════
+error_learning:
+  enabled: true
+  max_error_age_days: 7
+  auto_consolidate: true
+  similarity_threshold: 0.3
+
+# ═══════════════════════════════════════════════════════════
+# SUB-AGENTS
+# ═══════════════════════════════════════════════════════════
+agents:
+  SCOUT:
+    skills: [web_research, data_extract]
+  FORGE:
+    test_before_done: true
+    skills: [code_debug, code_review, test_gen, doc_gen]
+  LENS:
+    pareto_threshold: 0.2
+    skills: [code_review, security_scan, performance, dependency_check]
+  HERALD:
+    skills: [doc_gen]
+  GHOST:
+    stuck_threshold: 3
+    pattern_threshold: 3
+    skills: [deploy_prep, dependency_check]
+
+# ═══════════════════════════════════════════════════════════
+# TOOLS (44 Tools: 6 base + 10 developer + 6 advanced + 6 web + 4 vision + 7 AI media + 5 Hermes)
+# ═══════════════════════════════════════════════════════════
+tools:
+  base: [terminal, read_file, write_file, web_search, list_dir, code_exec]
+  developer: [git, docker, pkg_install, http_request, file_search, process_manager, env_check, port_check, json_yaml, file_ops]
+  advanced: [db_query, api_test, code_lint, archive_ops, csv_ops, scheduler_tool]
+  web: [web_browse, web_fetch, web_extract, web_links, web_download, web_screenshot]
+  vision: [vision_ocr, vision_analyze, vision_describe, vision_screenshot]
+  ai_media: [ai_image, ai_image_edit, ai_image_search, ai_vision, ai_video, ai_tts, ai_asr]
+  hermes: [rag_ingest, rag_search, self_reflect, plan_task, self_correct]
+  dangerous_requires_confirmation: false
+
+# ═══════════════════════════════════════════════════════════
+# TELEGRAM — Rich Edition v5.0
+# ═══════════════════════════════════════════════════════════
+telegram:
+  enabled: false
+  token: ""
+  authorized_users: []
+  typing_indicator: true               # Zeigt "Typing..." wenn Bot arbeitet
+  live_updates: true                   # Echtzeit-Statusmeldungen
+  emoji_mode: true                     # Emojis in allen Nachrichten
+  code_blocks: true                    # Code in Codeboxen
+  max_message_length: 4000
+  handle_photos: true                  # Fotos analysieren mit Vision
+  handle_voice: true                   # Sprachnachrichten transkribieren
+
+# ═══════════════════════════════════════════════════════════
+# CLI
+# ═══════════════════════════════════════════════════════════
+cli:
+  rich_output: true
+  prompt: "Toti >"
+  health_check_on_start: true

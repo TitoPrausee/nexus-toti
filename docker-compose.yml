@@ -1,0 +1,47 @@
+services:
+  nexus:
+    build:
+      context: .
+      args:
+        BUILD_WITH_TELEGRAM: 0
+    image: nexus-toti:latest
+    container_name: nexus-toti
+    stdin_open: true
+    tty: true
+    environment:
+      # Ollama laeuft auf dem Mac-Host
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      # Modell-Overrides (optional, default: qwen2.5:3b)
+      - NEXUS_MODEL_FAST=${NEXUS_MODEL_FAST:-qwen2.5:3b}
+      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-qwen2.5:3b}
+      - NEXUS_MODEL_THINK=${NEXUS_MODEL_THINK:-qwen2.5:3b}
+      - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - nexus_memory:/app/memory
+      - nexus_data:/app/data
+
+  nexus-telegram:
+    build:
+      context: .
+      args:
+        BUILD_WITH_TELEGRAM: 1
+    image: nexus-toti-telegram:latest
+    container_name: nexus-toti-telegram
+    profiles: ["telegram"]
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-qwen2.5:3b}
+      - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - nexus_memory:/app/memory
+      - nexus_data:/app/data
+    command: ["--telegram"]
+    restart: unless-stopped
+
+volumes:
+  nexus_memory:
+  nexus_data:

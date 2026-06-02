@@ -1,0 +1,261 @@
+"""
+NEXUS CLI Interface — Toti Edition v3.0
+Rich Terminal UI mit Ollama Cloud Integration, Error-Learning, Skill-System.
+"""
+
+import sys
+import time
+import asyncio
+from typing import Optional
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.markdown import Markdown
+    from rich.prompt import Prompt
+    from rich.theme import Theme
+    from rich.table import Table
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
+from core.llm_client import LLMClient, DEFAULT_AGENT_MODELS
+from core.memory import MemorySystem
+from core.tools import ToolRegistry
+from core.state import StateManager
+from core.guards import NexusGuards
+from core.error_learning import ErrorLearningSystem
+from agents.toti import TotiAgent
+from agents.scout import ScoutAgent
+from agents.forge import ForgeAgent
+from agents.lens import LensAgent
+from agents.herald import HeraldAgent
+from agents.ghost import GhostAgent
+
+
+TOTI_THEME = {
+    "toti.brand": "#ff6b35 bold",
+    "toti.agent": "#00d4ff bold",
+    "toti.success": "#00ff88",
+    "toti.warning": "#ffdd00",
+    "toti.error": "#ff3366",
+    "toti.dim": "#666666",
+    "toti.info": "#888888",
+    "toti.model": "#bb86fc",
+}
+
+
+class NexusCLI:
+    """Terminal Interface für Toti-powered NEXUS v3.0 mit Ollama Cloud."""
+
+    def __init__(self, session_id: Optional[str] = None):
+        self.console = Console(theme=Theme(TOTI_THEME)) if RICH_AVAILABLE else None
+        self.llm = LLMClient()
+        self.memory = MemorySystem(session_id=session_id)
+        self.tools = ToolRegistry()
+        self.state = StateManager()
+        self.guards = NexusGuards()
+        self.error_learning = ErrorLearningSystem()
+
+        self.toti = TotiAgent(
+            self.llm, self.memory, self.tools,
+            self.state, self.guards, self.error_learning,
+        )
+        self._register_agents()
+        self.running = False
+
+    def _register_agents(self):
+        agents = {
+            "SCOUT": ScoutAgent(self.llm, self.memory, self.tools,
+                                state=self.state, guards=self.guards, error_learning=self.error_learning),
+            "FORGE": ForgeAgent(self.llm, self.memory, self.tools,
+                                state=self.state, guards=self.guards, error_learning=self.error_learning),
+            "LENS": LensAgent(self.llm, self.memory, self.tools,
+                              state=self.state, guards=self.guards, error_learning=self.error_learning),
+            "HERALD": HeraldAgent(self.llm, self.memory, self.tools,
+                                  state=self.state, guards=self.guards, error_learning=self.error_learning),
+            "GHOST": GhostAgent(self.llm, self.memory, self.tools,
+                                state=self.state, guards=self.guards, error_learning=self.error_learning),
+        }
+        for aid, agent in agents.items():
+            self.toti.register_agent(aid, agent)
+
+        # Standard Scheduler-Tasks registrieren
+        ghost = agents["GHOST"]
+        ghost.register_scheduled_task("state_persist", "INTERVAL_TRIGGER",
+                                       fn=lambda: self.state.save(), interval_seconds=60)
+        ghost.register_scheduled_task("memory_compress", "INTERVAL_TRIGGER",
+                                       fn=lambda: self.memory._compress_rolling_summary(), interval_seconds=300)
+        ghost.register_scheduled_task("error_consolidate", "INTERVAL_TRIGGER",
+                                       fn=lambda: self.error_learning.consolidate(), interval_seconds=600)
+
+    def print(self, message: str, style: str = None):
+        if self.console:
+            self.console.print(message, style=style)
+        else:
+            print(message)
+
+    def print_banner(self):
+        banner = """
+╔═══════════════════════════════════════════════════════╗
+║                                                       ║
+║   ████████╗ ██████╗ ██████╗ ███████╗                 ║
+║   ╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝                 ║
+║      ██║   ██║   ██║██████╔╝███████╗                 ║
+║      ██║   ██║   ██║██╔══██╗╚════██║                 ║
+║      ██║   ╚██████╔╝██║  ██║███████║                 ║
+║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝                 ║
+║                                                       ║
+║   NEXUS System · Toti v3.0 · Ollama Cloud             ║
+║   6 Agent-Modelle · Error Learning · 22 Tools         ║
+║   Autonom · Direkt · Lernt aus Fehlern                ║
+║                                                       ║
+╚═══════════════════════════════════════════════════════╝
+"""
+        if self.console:
+            self.console.print(banner, style="toti.brand")
+        else:
+            print(banner)
+
+    def print_model_table(self):
+        """Drucke die Modell-Zuordnungstabelle."""
+        if self.console:
+            table = Table(title="Ollama Cloud Modell-Zuordnung", border_style="toti.model")
+            table.add_column("Agent", style="toti.agent")
+            table.add_column("Modell", style="toti.model")
+            table.add_column("Backend", style="toti.info")
+            table.add_column("Status", style="toti.success")
+
+            health = self.llm.get_health_status()
+            for agent_id, cfg in DEFAULT_AGENT_MODELS.items():
+                model = cfg.get("model", "?")
+                h = health.get(agent_id, {})
+                backend = h.get("backend", "?")
+                status = "OK" if h.get("available", False) else h.get("error", "nicht getestet")[:30]
+                table.add_row(agent_id, model, backend, status)
+
+            self.console.print(table)
+        else:
+            print(self.llm.get_model_table())
+
+    def print_status_bar(self):
+        guards = self.guards.get_status()
+        llm_stats = self.llm.get_stats()
+        error_stats = self.error_learning.get_error_stats()
+        task = self.state.get("current_task.status", "idle")
+
+        backend = llm_stats.get("active_backend", "?")
+        cloud = "Cloud:Y" if llm_stats.get("cloud_available") else "Cloud:N"
+        local = "Local:Y" if llm_stats.get("local_available") else "Local:N"
+        zai = "z-ai:Y" if llm_stats.get("zai_available") else "z-ai:N"
+
+        self.print(
+            f"  State: [toti.info]{task}[/] | "
+            f"Budget: [toti.info]{guards['budget_used_pct']}%[/] | "
+            f"Steps: [toti.info]{guards['steps']}/{guards['max_steps']}[/] | "
+            f"LLM: [toti.info]{llm_stats['total_calls']} calls[/] | "
+            f"Errors: [toti.info]{error_stats['total_unique_errors']} known/{error_stats['session_avoided']} avoided[/]"
+        )
+        self.print(
+            f"  Backend: [toti.model]{backend}[/] | "
+            f"[toti.info]{cloud} | {local} | {zai}[/] | "
+            f"API Key: [toti.info]{'gesetzt' if llm_stats.get('api_key_set') else 'FEHLT'}[/]"
+        )
+
+    def run(self):
+        self.running = True
+        self.print_banner()
+
+        # LLM Health-Check beim Start
+        self.print("  [toti.dim]Prüfe Ollama Cloud Modelle...[/]")
+        self.llm.run_health_check()
+        self.print_model_table()
+        self.print("")
+        self.print_status_bar()
+        self.print("")
+        self.print("  [toti.success]Toti v3.0 online. Ollama Cloud Routing aktiv. 22 Tools, 10 Skills bereit.[/]")
+        self.print("  [toti.dim]/help für Befehle · /models für Modell-Status · Ctrl+C oder /quit zum Beenden.[/]")
+        self.print("")
+
+        while self.running:
+            try:
+                if self.console:
+                    user_input = Prompt.ask("[toti.brand]Toti >[/]", console=self.console)
+                else:
+                    user_input = input("Toti > ").strip()
+
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ("/quit", "/exit", "quit", "exit"):
+                    self._shutdown()
+                    break
+
+                self.print("")
+                start = time.time()
+
+                try:
+                    response = self.toti.process(user_input)
+                    elapsed = time.time() - start
+
+                    if self.console:
+                        self.console.print(
+                            Panel(
+                                Markdown(response) if len(response) > 100 else response,
+                                title="[toti.brand]Toti[/]",
+                                subtitle=f"[toti.dim]{elapsed:.1f}s | Backend: {self.llm.active_backend}[/]",
+                                border_style="toti.brand",
+                            )
+                        )
+                    else:
+                        print(f"\n--- Toti ({elapsed:.1f}s, {self.llm.active_backend}) ---")
+                        print(response)
+                        print("---")
+
+                except Exception as e:
+                    self.print(f"  [toti.error]Error: {str(e)}[/]")
+                    self.error_learning.record_error(
+                        error_class="AGENT_ERROR",
+                        context=user_input[:200],
+                        action=f"process({user_input[:100]})",
+                        error_message=str(e),
+                        agent="TOTI",
+                    )
+
+                # Auto-Save State
+                self.state.save()
+                self.memory.session_save()
+                self.print("")
+
+            except KeyboardInterrupt:
+                self.print("\n  [toti.warning]Interrupted. /quit zum Beenden.[/]")
+                continue
+            except EOFError:
+                self._shutdown()
+                break
+
+    def _shutdown(self):
+        self.print("")
+        self.print("  [toti.warning]Shutting down...[/]")
+
+        # State speichern
+        self.state.save()
+        self.memory.session_save()
+
+        # GHOST: persist
+        ghost = self.toti.delegation._agents.get("GHOST")
+        if ghost:
+            ghost.save_session_state()
+
+        # Error-Learning konsolidieren
+        self.error_learning.consolidate()
+
+        self.print("  [toti.success]State gespeichert. Fehler-DB aktualisiert. Bis dann.[/]")
+
+    def process_single(self, task: str) -> str:
+        """Single-Task-Modus — kein interaktiver Loop."""
+        response = self.toti.process(task)
+        self.state.save()
+        self.memory.session_save()
+        self.error_learning.consolidate()
+        return response

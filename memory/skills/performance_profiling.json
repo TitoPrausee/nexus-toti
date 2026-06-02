@@ -1,0 +1,13 @@
+{
+  "pattern": "FORGE profiles code. TOOL:process_manager for resources. TOOL:code_exec for benchmarks.",
+  "description": "Profile and optimize code performance, identify bottlenecks",
+  "agent": "FORGE",
+  "tools": [
+    "code_exec",
+    "process_manager",
+    "terminal",
+    "read_file"
+  ],
+  "updated": 1780053326.9827394,
+  "version": "2.0"
+}

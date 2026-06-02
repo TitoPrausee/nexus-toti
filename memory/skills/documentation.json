@@ -1,0 +1,13 @@
+{
+  "pattern": "HERALD formats. TOOL:read_file for source. TOOL:write_file for output.",
+  "description": "Generate and maintain documentation from source code",
+  "agent": "HERALD",
+  "tools": [
+    "read_file",
+    "write_file",
+    "file_search",
+    "list_dir"
+  ],
+  "updated": 1780053326.9827929,
+  "version": "2.0"
+}

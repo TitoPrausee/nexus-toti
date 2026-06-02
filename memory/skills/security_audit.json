@@ -1,0 +1,13 @@
+{
+  "pattern": "LENS + TOOL:file_search for secrets/patterns. TOOL:port_check for exposure.",
+  "description": "Security audit: scan for secrets, check permissions, find vulnerabilities",
+  "agent": "LENS",
+  "tools": [
+    "file_search",
+    "read_file",
+    "port_check",
+    "terminal"
+  ],
+  "updated": 1780053326.9826982,
+  "version": "2.0"
+}

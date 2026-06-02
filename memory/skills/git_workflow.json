@@ -1,0 +1,12 @@
+{
+  "pattern": "TOOL:git for all operations. Smart branching, merging, conflict resolution.",
+  "description": "Git workflow management: branching strategies, merging, rebasing, conflict resolution",
+  "agent": "FORGE",
+  "tools": [
+    "git",
+    "terminal",
+    "read_file"
+  ],
+  "updated": 1780053326.982972,
+  "version": "2.0"
+}

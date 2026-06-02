@@ -1,0 +1,8 @@
+{
+  "pattern": "DAG decomposition, parallel independent tasks, sequential dependencies",
+  "description": "Plan complex multi-step tasks with dependency-aware scheduling",
+  "agent": "TOTI",
+  "tools": [],
+  "updated": 1780053326.982402,
+  "version": "2.0"
+}

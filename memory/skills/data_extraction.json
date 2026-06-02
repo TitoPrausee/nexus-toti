@@ -1,0 +1,13 @@
+{
+  "pattern": "SCOUT for raw data → FORGE for processing → HERALD for formatting",
+  "description": "Extract and process data from sources, format output",
+  "agent": "SCOUT",
+  "tools": [
+    "web_search",
+    "read_file",
+    "code_exec",
+    "json_yaml"
+  ],
+  "updated": 1780053326.9821563,
+  "version": "2.0"
+}
