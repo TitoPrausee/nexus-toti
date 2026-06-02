@@ -217,10 +217,13 @@ class LLMClient:
             or os.environ.get("OLLAMA_API_KEY", "")
         )
 
-        # URLs
+        # URLs — OLLAMA_HOST env var overrides local_url (for Docker containers)
         self._cloud_url = self._ollama_config.get("base_url", "https://api.ollama.ai")
-        self._local_url = self._ollama_config.get("local_url", "http://localhost:11434")
+        self._local_url = os.environ.get("OLLAMA_HOST", self._ollama_config.get("local_url", "http://localhost:11434"))
         self._mode = self._ollama_config.get("mode", "cloud")
+        # If no API key, force local mode (Ollama Cloud models served via local Ollama)
+        if not self._api_key and self._mode == "cloud":
+            self._mode = "local"
 
         # Backend-Verfügbarkeit
         self._cloud_available = bool(self._api_key)
@@ -239,27 +242,30 @@ class LLMClient:
         else:
             self._zai_integration_available = False
 
-        # Aktiver Backend
-        self._active_backend = self._determine_backend()
-
         # Fallback-Modelle
         self._fallback_cloud = self._ollama_config.get("fallback_models", {}).get("cloud", "glm-5.1:cloud")
         self._fallback_local = self._ollama_config.get("fallback_models", {}).get("local", "qwen2.5:3b")
         self._fallback_zai = self._ollama_config.get("fallback_models", {}).get("zai", "glm-4-plus")
         self._fallback_emergency = self._ollama_config.get("fallback_models", {}).get("emergency", "qwen2.5:3b")
 
-        # qwen2.5:3b Emergency Fallback
+        # qwen2.5:3b Emergency Fallback (must be set before _determine_backend)
         self._emergency_model = "qwen2.5:3b"
         self._emergency_available = self._check_emergency_model()
+
+        # Aktiver Backend (depends on _emergency_available)
+        self._active_backend = self._determine_backend()
         if self._active_backend == "none" and self._emergency_available:
             self._active_backend = "ollama_emergency"
 
         # Streaming state
         self._streaming_active = False
 
-        # Health-Check
+        # Health-Check (non-blocking — test only the orchestrator model)
         if self._ollama_config.get("health_check_on_start", True):
-            self.run_health_check()
+            try:
+                self.run_health_check()
+            except Exception:
+                pass  # Don't block startup on health check failures
 
     def _load_config(self, config_path: Optional[str] = None) -> dict:
         """Lade config.yaml."""
@@ -463,13 +469,13 @@ class LLMClient:
             except Exception as e:
                 health.error = f"Cloud: {str(e)[:100]}"
 
-        # 2. Versuch: Lokaler Ollama
+        # 2. Versuch: Lokaler Ollama (Cloud-Modelle werden direkt ueber local Ollama bereitgestellt)
         if self._local_available:
             try:
-                local_model = model_name.replace(":cloud", ":latest")
+                # Use model name as-is — Ollama Cloud models are served via local Ollama with :cloud tag
                 start = time.time()
                 resp = self._call_ollama_local(
-                    local_model, test_messages, temperature=0.1, max_tokens=10
+                    model_name, test_messages, temperature=0.1, max_tokens=10
                 )
                 elapsed = time.time() - start
                 if resp and resp.get("content", "").strip():
@@ -623,13 +629,12 @@ class LLMClient:
                     last_error = e
                     self._update_health(agent_id, model_name, False, 0, "ollama_cloud", str(e)[:200])
 
-            # 2. Versuch: Lokaler Ollama
+            # 2. Versuch: Lokaler Ollama (Cloud-Modelle direkt ueber local Ollama)
             if self._local_available:
                 try:
-                    local_model = model_name.replace(":cloud", ":latest")
                     start = time.time()
                     result = self._call_ollama_local(
-                        local_model,
+                        model_name,
                         [Message(role="system", content=sys_prompt), Message(role="user", content=user_prompt)],
                         temperature=temperature,
                         max_tokens=max_tokens,
@@ -640,11 +645,11 @@ class LLMClient:
                     if content.strip():
                         self._call_count += 1
                         self._total_tokens += result.get("usage", {}).get("total_tokens", 0)
-                        self._update_health(agent_id, local_model, True, elapsed, "ollama_local")
+                        self._update_health(agent_id, model_name, True, elapsed, "ollama_local")
 
                         return LLMResponse(
                             content=content,
-                            model=local_model,
+                            model=model_name,
                             usage=result.get("usage", {}),
                             raw=result,
                             elapsed=elapsed,
@@ -949,7 +954,7 @@ class LLMClient:
         # 4. Try Ollama Local streaming
         if self._local_available and REQUESTS_AVAILABLE:
             try:
-                yield from self._stream_ollama_local(model_name.replace(":cloud", ":latest"), messages, sys_prompt)
+                yield from self._stream_ollama_local(model_name, messages, sys_prompt)
                 return
             except Exception:
                 pass

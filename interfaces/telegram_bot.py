@@ -313,7 +313,7 @@ class TelegramFormatter:
             f"{iq.get_motivation()}",
             f"",
             f"{E['gear']} *Task*: {task_status}",
-            f"{E['eyes']} *Ziel*: {task_goal[:60] if task_goal != 'none' else '\\-'}",
+            f"{E['eyes']} *Ziel*: {task_goal[:60] if task_goal != 'none' else chr(92) + '-'}",
             f"{E['guard']} *Steps*: {guards['steps']}/{guards['max_steps']}",
             f"{E['budget']} *Budget*: {TelegramFormatter.progress_bar(guards['budget_used_pct'])}",
             f"",
