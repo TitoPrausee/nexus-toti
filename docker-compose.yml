@@ -1,7 +1,20 @@
+# NEXUS v6.0 — Docker Compose Configuration
+# ═══════════════════════════════════════════════════════════
+# Quick start:
+#   curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash
+#
+# Or manually:
+#   git clone https://github.com/***REMOVED***/nexus-toti.git && cd nexus-toti
+#   cp .env.example .env  # Edit .env with your keys
+#   docker compose up nexus
+# ═══════════════════════════════════════════════════════════
+
 services:
+  # ── NEXUS CLI Mode ──────────────────────────────────────
   nexus:
     build:
       context: .
+      dockerfile: Dockerfile
       args:
         BUILD_WITH_TELEGRAM: 0
     image: nexus-toti:latest
@@ -9,39 +22,63 @@ services:
     stdin_open: true
     tty: true
     environment:
-      # Ollama laeuft auf dem Mac-Host
-      - OLLAMA_HOST=http://host.docker.internal:11434
-      # Modell-Overrides (optional, default: qwen2.5:3b)
-      - NEXUS_MODEL_FAST=${NEXUS_MODEL_FAST:-qwen2.5:3b}
-      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-qwen2.5:3b}
-      - NEXUS_MODEL_THINK=${NEXUS_MODEL_THINK:-qwen2.5:3b}
-      - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
+      # Ollama connection (host.docker.internal for Docker Desktop)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      # Model routing
+      - NEXUS_MODEL_FAST=${NEXUS_MODEL_FAST:-glm-5.1:cloud}
+      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-kimi-k2.6:cloud}
+      - NEXUS_MODEL_THINK=${NEXUS_MODEL_THINK:-kimi-k2.6:cloud}
+      # z.ai CLI (for VLM/vision)
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_memory:/app/memory
       - nexus_data:/app/data
+      - nexus_skills:/app/skills
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import core; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
+  # ── NEXUS Telegram Bot Mode ────────────────────────────
   nexus-telegram:
     build:
       context: .
+      dockerfile: Dockerfile
       args:
         BUILD_WITH_TELEGRAM: 1
     image: nexus-toti-telegram:latest
     container_name: nexus-toti-telegram
     profiles: ["telegram"]
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
-      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-qwen2.5:3b}
-      - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - NEXUS_MODEL_FAST=${NEXUS_MODEL_FAST:-glm-5.1:cloud}
+      - NEXUS_MODEL_STANDARD=${NEXUS_MODEL_STANDARD:-kimi-k2.6:cloud}
+      - NEXUS_MODEL_THINK=${NEXUS_MODEL_THINK:-kimi-k2.6:cloud}
+      - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_memory:/app/memory
       - nexus_data:/app/data
+      - nexus_skills:/app/skills
     command: ["--telegram"]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import core; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 volumes:
   nexus_memory:
   nexus_data:
+  nexus_skills:
