@@ -38,6 +38,20 @@ services:
     command: ["--telegram"]
     restart: unless-stopped
 
+  nexus-contributor-bot:
+    build: .
+    image: nexus-toti:v7
+    container_name: nexus-contributor-bot
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - nexus_data:/app/data
+    command: ["--contributor-bot"]
+    restart: unless-stopped
+
 volumes:
   nexus_data:
   nexus_soul:
