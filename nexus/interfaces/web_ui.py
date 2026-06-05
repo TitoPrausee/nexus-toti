@@ -424,6 +424,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .send.spin svg{animation:spin .8s linear infinite}
 @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 .rate{font-size:11px;color:var(--muted);text-align:center;padding:4px 0 0}
+.preview-btn{display:inline-block;padding:4px 12px;margin:4px 0 2px;background:linear-gradient(135deg,var(--accent3),var(--accent));color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:all .2s}
+.preview-btn:hover{opacity:.85;transform:translateY(-1px)}
+.preview-container{margin:0 0 8px}
 @media(max-width:600px){.bub{max-width:86%}.hdr{padding:10px 14px}.msgs{padding:10px}.bar{padding:10px 12px}}
 .msgs{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 </style>
@@ -573,12 +576,44 @@ function esc(t) { const d=document.createElement('div'); d.textContent=t; return
 
 function fmtMsg(t) {
   let h = esc(t);
-  h = h.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g,'<pre><code>$2</code></pre>');
+  // Code blocks with preview button for HTML/React
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, function(match, lang, code) {
+    const isPreviewable = /^(html|xml|svg|jsx|tsx|react)$/i.test(lang) || (lang === '' && /<!DOCTYPE|<html|<div|<body|<svg|<style|react/i.test(code));
+    const previewBtn = isPreviewable ? '<button class="preview-btn" onclick="togglePreview(this)">Vorschau</button>' : '';
+    return previewBtn + '<pre><code>' + code + '</code></pre>';
+  });
   h = h.replace(/`([^`]+)`/g,'<code>$1</code>');
-  h = h.replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>');
-  h = h.replace(/\\*([^*]+)\\*/g,'<em>$1</em>');
-  h = h.replace(/\\n/g,'<br>');
+  h = h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  h = h.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  h = h.replace(/\n/g,'<br>');
   return h;
+}
+
+function togglePreview(btn) {
+  const pre = btn.nextElementSibling;
+  if (!pre) return;
+  const code = pre.querySelector('code') ? pre.querySelector('code').textContent : pre.textContent;
+  // Check if preview container already exists
+  let container = btn.parentElement.querySelector('.preview-container');
+  if (container) {
+    container.remove();
+    btn.textContent = 'Vorschau';
+    return;
+  }
+  btn.textContent = 'Vorschau schliessen';
+  container = document.createElement('div');
+  container.className = 'preview-container';
+  // Wrap code in full HTML if it's a fragment
+  let html = code.trim();
+  if (!/<html/i.test(html)) {
+    html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;padding:16px}</style></head><body>' + html + '</body></html>';
+  }
+  const iframe = document.createElement('iframe');
+  iframe.sandbox = 'allow-scripts allow-same-origin';
+  iframe.style.cssText = 'width:100%;height:350px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px';
+  container.appendChild(iframe);
+  btn.parentElement.insertBefore(container, btn.nextSibling);
+  iframe.srcdoc = html;
 }
 
 function addMsg(role, content) {
