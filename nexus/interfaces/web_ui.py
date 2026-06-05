@@ -1,12 +1,14 @@
 """
 NEXUS v7 — Web UI Interface
-FastAPI + WebSocket chat for invited friends on Tailscale.
+FastAPI chat with invite-gate, per-user memory, rate limiting.
+Startup landing page + chat interface.
 """
 
 import os
 import json
 import uuid
 import hashlib
+import time
 import logging
 from typing import Optional
 from pathlib import Path
@@ -23,9 +25,11 @@ log = logging.getLogger("nexus.web")
 
 # --- Config ---
 WEB_PORT = int(os.environ.get("NEXUS_WEB_PORT", "3000"))
-SESSION_TIMEOUT = 3600 * 2  # 2 hours idle session cleanup
+SESSION_TIMEOUT = 3600 * 2
+RATE_LIMIT_REQUESTS = 30   # max messages per user per window
+RATE_LIMIT_WINDOW = 3600   # 1 hour window
 
-# Invite codes — {code: user_label} for per-user memory isolation
+# Invite codes — {code: user_label}
 _invite_env = os.environ.get("NEXUS_INVITE_CODES", "")
 if _invite_env:
     INVITE_CODES: dict[str, str] = {c.strip(): c.strip() for c in _invite_env.split(",") if c.strip()}
@@ -36,11 +40,10 @@ else:
         "alpha-test": "Alpha-Tester",
     }
 
-# Invite tokens -> invite code mapping (for per-user identity)
-_valid_tokens: dict[str, str] = {}  # {token: invite_code}
-
-# Per-user memory: {invite_code: [messages]}
-_user_memory: dict[str, list] = {}
+# Runtime state
+_valid_tokens: dict[str, str] = {}       # {token: invite_code}
+_user_memory: dict[str, list] = {}        # {invite_code: [messages]}
+_rate_limits: dict[str, list] = {}        # {invite_code: [timestamps]}
 
 
 class WebSession:
@@ -52,14 +55,12 @@ class WebSession:
         self.history: list[dict] = []
 
     def init_agent(self, config: dict):
-        """Lazy-init agent per session."""
         if self.agent is None:
             self.agent = NexusAgent(config)
         return self.agent
 
 
 class SessionManager:
-    """Manages all active web sessions."""
     def __init__(self):
         self.sessions: dict[str, WebSession] = {}
 
@@ -72,8 +73,6 @@ class SessionManager:
         return session
 
     def cleanup(self):
-        """Remove stale sessions."""
-        import time
         now = time.time()
         stale = [
             sid for sid, s in self.sessions.items()
@@ -86,11 +85,18 @@ class SessionManager:
 sessions = SessionManager()
 
 
+def _check_rate_limit(invite_code: str) -> bool:
+    """Return True if within rate limit."""
+    now = time.time()
+    timestamps = _rate_limits.setdefault(invite_code, [])
+    # Remove old entries
+    _rate_limits[invite_code] = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
+    return len(_rate_limits[invite_code]) < RATE_LIMIT_REQUESTS
+
+
 def create_app(config: dict = None) -> FastAPI:
-    """Create the FastAPI app with all routes."""
     config = config or {}
 
-    # Try loading config.yaml
     if not config:
         try:
             import yaml
@@ -102,7 +108,6 @@ def create_app(config: dict = None) -> FastAPI:
 
     app = FastAPI(title="NEXUS v7", docs_url=None, redoc_url=None)
 
-    # CORS for Tailscale access
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -113,6 +118,10 @@ def create_app(config: dict = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
+        return HTMLResponse(get_landing_html())
+
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_page():
         return HTMLResponse(get_chat_html())
 
     @app.get("/health")
@@ -121,28 +130,30 @@ def create_app(config: dict = None) -> FastAPI:
 
     @app.post("/api/invite")
     async def verify_invite(request: Request):
-        """Verify an invite code and return a session token."""
         body = await request.json()
         code = body.get("code", "").strip()
         if code in INVITE_CODES:
             token = hashlib.sha256(f"{code}:{uuid.uuid4()}".encode()).hexdigest()[:24]
-            _valid_tokens[token] = code  # map token -> invite code
-            return {"valid": True, "token": token, "label": INVITE_CODES[code]}
+            _valid_tokens[token] = code
+            return {"valid": True, "token": token, "label": INVITE_CODES[code], "daily_limit": RATE_LIMIT_REQUESTS}
         return JSONResponse({"valid": False, "error": "Ungueltiger Code"}, status_code=403)
 
     @app.post("/api/chat")
     async def chat_api(request: Request):
-        """REST API for chat — returns full response."""
         body = await request.json()
-        # Validate invite token
         invite_token = body.get("invite_token", "")
         if invite_token not in _valid_tokens:
-            raise HTTPException(403, "Ungueltiger Einladungscode. Bitte fordere einen Code beim Server-Admin an.")
+            raise HTTPException(403, "Ungueltiger Einladungscode.")
 
         invite_code = _valid_tokens[invite_token]
         message = body.get("message", "").strip()
         session_id = body.get("session_id")
         user_name = body.get("user_name", "Guest")
+
+        # Rate limit
+        if not _check_rate_limit(invite_code):
+            remaining_time = RATE_LIMIT_WINDOW
+            raise HTTPException(429, f"Rate-Limit erreicht. Maximal {RATE_LIMIT_REQUESTS} Nachrichten pro Stunde. Versuche es spaeter wieder.")
 
         if not message:
             raise HTTPException(400, "Message required")
@@ -150,18 +161,29 @@ def create_app(config: dict = None) -> FastAPI:
         session = sessions.get_or_create(session_id, user_name)
         agent = session.init_agent(config)
 
-        # Ping for auth check — don't process or store
         if message == "__ping__":
             return {"response": "pong", "session_id": session.id, "user_name": session.user_name}
 
-        # Build context with per-user memory
+        # Per-user memory
         user_history = _user_memory.setdefault(invite_code, [])
         user_history.append({"role": "user", "content": message})
 
-        try:
-            response = agent.process(message, user_id=session.id)
+        # Rate limit tracking
+        _rate_limits.setdefault(invite_code, []).append(time.time())
 
-            # If response is empty/error, give a friendly fallback
+        try:
+            # Inject recent history as context (last 10 messages)
+            context_messages = user_history[-10:]
+            full_message = message
+            if len(context_messages) > 1:
+                context_str = "\n".join(
+                    f"{'User' if m['role']=='user' else 'Nexus'}: {m['content']}"
+                    for m in context_messages[:-1]
+                )
+                full_message = f"Kontext unserer Unterhaltung:\n{context_str}\n\nNeue Nachricht: {message}"
+
+            response = agent.process(full_message, user_id=session.id)
+
             if not response or not isinstance(response, str):
                 response = "Ich konnte leider keine Verbindung zum Sprachmodell herstellen. Bitte versuche es spaeter nochmal."
 
@@ -171,788 +193,434 @@ def create_app(config: dict = None) -> FastAPI:
             if len(user_history) > 50:
                 _user_memory[invite_code] = user_history[-50:]
 
-            session.history.append({"role": "user", "content": message, "ts": __import__("time").time()})
-            session.history.append({"role": "assistant", "content": response, "ts": __import__("time").time()})
+            session.history.append({"role": "user", "content": message, "ts": time.time()})
+            session.history.append({"role": "assistant", "content": response, "ts": time.time()})
 
-            # Cleanup old sessions periodically
             if len(sessions.sessions) > 50:
                 sessions.cleanup()
 
+            remaining = RATE_LIMIT_REQUESTS - len(_rate_limits.get(invite_code, []))
             return {
                 "response": response,
                 "session_id": session.id,
                 "user_name": session.user_name,
+                "remaining": remaining,
             }
         except Exception as e:
             log.error(f"Chat error: {e}")
             raise HTTPException(500, str(e))
 
-    @app.websocket("/ws/chat")
-    async def websocket_chat(ws: WebSocket):
-        """WebSocket for streaming chat experience."""
-        await ws.accept()
-
-        session_id = None
-        agent = None
-
-        try:
-            while True:
-                data = await ws.receive_text()
-                try:
-                    msg = json.loads(data)
-                except json.JSONDecodeError:
-                    await ws.send_json({"type": "error", "content": "Invalid JSON"})
-                    continue
-
-                message = msg.get("message", "").strip()
-                user_name = msg.get("user_name", "Guest")
-                session_id = msg.get("session_id") or session_id
-
-                if not message:
-                    await ws.send_json({"type": "error", "content": "Empty message"})
-                    continue
-
-                session = sessions.get_or_create(session_id, user_name)
-                session_id = session.id
-                agent = session.init_agent(config)
-
-                # Send typing indicator
-                await ws.send_json({"type": "typing", "status": True})
-
-                try:
-                    response = agent.process(message, user_id=session.id)
-
-                    session.history.append({"role": "user", "content": message, "ts": __import__("time").time()})
-                    session.history.append({"role": "assistant", "content": response, "ts": __import__("time").time()})
-
-                    # Stream in chunks for better UX
-                    chunk_size = 80
-                    for i in range(0, len(response), chunk_size):
-                        chunk = response[i:i + chunk_size]
-                        await ws.send_json({
-                            "type": "chunk",
-                            "content": chunk,
-                            "done": i + chunk_size >= len(response),
-                        })
-                        await __import__("asyncio").sleep(0.01)
-
-                    await ws.send_json({
-                        "type": "done",
-                        "session_id": session.id,
-                        "full_response": response,
-                    })
-                except Exception as e:
-                    log.error(f"WS chat error: {e}")
-                    await ws.send_json({"type": "error", "content": f"Fehler: {str(e)}"})
-                finally:
-                    await ws.send_json({"type": "typing", "status": False})
-
-        except WebSocketDisconnect:
-            log.info(f"WebSocket disconnected: {session_id}")
-        except Exception as e:
-            log.error(f"WS error: {e}")
-
-    @app.get("/api/sessions")
-    async def list_sessions():
-        return {
-            "active": len(sessions.sessions),
-            "sessions": [
-                {"id": s.id, "user": s.user_name, "messages": len(s.history)}
-                for s in sessions.sessions.values()
-            ],
-        }
-
     return app
 
 
-def get_chat_html() -> str:
-    """Inline HTML for Nexus chat UI — dark theme, SVG icons, typing animation."""
+def get_landing_html() -> str:
+    """Startup-style landing page."""
     return '''<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEXUS v7</title>
+<title>NEXUS — KI-Agent mit Seele</title>
 <style>
-:root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-tertiary: #1a1a26;
-  --bg-input: #16162a;
-  --text-primary: #e8e8f0;
-  --text-secondary: #9999b0;
-  --text-muted: #666680;
-  --accent: #6c5ce7;
-  --accent-glow: rgba(108, 92, 231, 0.3);
-  --accent-hover: #7d6ff0;
-  --border: #2a2a3a;
-  --user-bubble: #1e1e3a;
-  --nexus-bubble: #16162a;
-  --success: #00b894;
-  --error: #ff6b6b;
-  --radius: 12px;
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  height: 100vh;
-  overflow: hidden;
-}
-
-.app {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  max-width: 860px;
-  margin: 0 auto;
-}
-
-/* Header */
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.logo {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, var(--accent), #a29bfe);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.logo svg {
-  width: 22px;
-  height: 22px;
-  fill: none;
-  stroke: white;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.header-title {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-}
-
-.header-sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  display: inline-block;
-  margin-right: 6px;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* Name input overlay */
-.name-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  backdrop-filter: blur(10px);
-}
-
-.name-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 40px;
-  max-width: 400px;
-  width: 90%;
-  text-align: center;
-}
-
-.name-card h2 {
-  font-size: 22px;
-  margin-bottom: 8px;
-}
-
-.name-card p {
-  color: var(--text-secondary);
-  font-size: 14px;
-  margin-bottom: 24px;
-  line-height: 1.5;
-}
-
-.name-input {
-  width: 100%;
-  padding: 12px 16px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-size: 16px;
-  outline: none;
-  transition: border 0.2s;
-}
-
-.name-input:focus {
-  border-color: var(--accent);
-}
-
-.name-btn {
-  width: 100%;
-  padding: 12px;
-  margin-top: 16px;
-  background: var(--accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.name-btn:hover {
-  background: var(--accent-hover);
-}
-
-/* Messages */
-.messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  scroll-behavior: smooth;
-}
-
-.messages::-webkit-scrollbar { width: 6px; }
-.messages::-webkit-scrollbar-track { background: transparent; }
-.messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-.welcome {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-muted);
-}
-
-.welcome h3 {
-  font-size: 20px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.welcome p {
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  margin-top: 16px;
-}
-
-.suggestion {
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.suggestion:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-
-.msg {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
-  animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.msg.user { flex-direction: row-reverse; }
-
-.msg-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.msg.user .msg-avatar {
-  background: linear-gradient(135deg, #00b894, #00cec9);
-  color: white;
-}
-
-.msg.nexus .msg-avatar {
-  background: linear-gradient(135deg, var(--accent), #a29bfe);
-  color: white;
-}
-
-.msg-bubble {
-  max-width: 70%;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  line-height: 1.6;
-  font-size: 14px;
-}
-
-.msg.user .msg-bubble {
-  background: var(--user-bubble);
-  border-bottom-right-radius: 4px;
-}
-
-.msg.nexus .msg-bubble {
-  background: var(--nexus-bubble);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
-
-.msg-bubble code {
-  background: rgba(108, 92, 231, 0.15);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 13px;
-}
-
-.msg-bubble pre {
-  background: var(--bg-primary);
-  padding: 12px;
-  border-radius: 8px;
-  overflow-x: auto;
-  margin: 8px 0;
-  font-size: 13px;
-}
-
-.msg-time {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
-.typing-indicator {
-  display: none;
-  padding: 4px 20px;
-}
-
-.typing-indicator.active { display: flex; align-items: center; gap: 10px; }
-
-.typing-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 18px;
-  background: var(--nexus-bubble);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  border-bottom-left-radius: 4px;
-}
-
-.typing-bubble .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: bounce 1.4s infinite ease-in-out;
-}
-
-.typing-bubble .dot:nth-child(2) { animation-delay: 0.16s; }
-.typing-bubble .dot:nth-child(3) { animation-delay: 0.32s; }
-
-@keyframes bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-8px); opacity: 1; }
-}
-
-/* Input */
-.input-area {
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-
-.input-wrapper {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-.msg-input {
-  flex: 1;
-  padding: 12px 16px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-size: 15px;
-  outline: none;
-  resize: none;
-  max-height: 120px;
-  line-height: 1.4;
-  font-family: inherit;
-  transition: border 0.2s;
-}
-
-.msg-input:focus { border-color: var(--accent); }
-.msg-input::placeholder { color: var(--text-muted); }
-
-.send-btn {
-  padding: 12px;
-  background: var(--accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.send-btn svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: white;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.send-btn:hover { background: var(--accent-hover); }
-.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.send-btn.loading svg { animation: spin 1s linear infinite; }
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Responsive */
-@media (max-width: 600px) {
-  .msg-bubble { max-width: 85%; }
-  .header { padding: 12px 16px; }
-  .messages { padding: 12px; }
-  .input-area { padding: 12px; }
-}
-
-/* Dark scrollbar for Firefox */
-.messages {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
+:root{--bg:#07070d;--bg2:#0e0e18;--bg3:#151524;--text:#e4e4f0;--text2:#9494b0;--muted:#5c5c78;--accent:#6c5ce7;--accent2:#a29bfe;--accent3:#4f46e5;--green:#00b894;--border:#1f1f35;--radius:14px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;overflow-x:hidden}
+a{color:var(--accent2);text-decoration:none}
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 20px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at 50% 40%,rgba(108,92,231,.12) 0%,transparent 60%);pointer-events:none}
+.logo-mark{width:72px;height:72px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:28px;animation:float 3s ease-in-out infinite}
+.logo-mark svg{width:40px;height:40px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.hero h1{font-size:clamp(2.2rem,5vw,3.5rem);font-weight:800;letter-spacing:-.02em;margin-bottom:16px;background:linear-gradient(135deg,var(--text) 40%,var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:1.15rem;color:var(--text2);max-width:540px;margin-bottom:36px}
+.hero-sub{font-size:.95rem;color:var(--muted);margin-bottom:20px}
+.cta{display:inline-flex;align-items:center;gap:10px;padding:16px 36px;background:linear-gradient(135deg,var(--accent3),var(--accent));color:#fff;border-radius:60px;font-size:1.05rem;font-weight:600;border:none;cursor:pointer;transition:all .25s;box-shadow:0 4px 24px rgba(108,92,231,.35)}
+.cta:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(108,92,231,.5)}
+.cta svg{width:20px;height:20px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;max-width:960px;margin:0 auto;padding:80px 20px}
+.feat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:32px 28px;transition:border-color .2s}
+.feat:hover{border-color:var(--accent)}
+.feat-icon{width:44px;height:44px;background:linear-gradient(135deg,var(--accent3),var(--accent));border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.feat-icon svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.feat h3{font-size:1.1rem;font-weight:600;margin-bottom:8px}
+.feat p{font-size:.92rem;color:var(--text2);line-height:1.6}
+.section{max-width:960px;margin:0 auto;padding:60px 20px}
+.section h2{font-size:1.8rem;font-weight:700;margin-bottom:12px;text-align:center}
+.section .sub{text-align:center;color:var(--text2);margin-bottom:40px;font-size:1.05rem}
+.limit-bar{max-width:480px;margin:0 auto;background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:24px 28px;text-align:center}
+.limit-bar h4{font-size:1rem;font-weight:600;margin-bottom:10px;color:var(--text)}
+.limit-bar p{font-size:.88rem;color:var(--text2)}
+.limit-num{font-size:2.2rem;font-weight:800;color:var(--accent2);display:block;margin:8px 0}
+footer{text-align:center;padding:40px 20px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--border)}
+@media(max-width:640px){.hero h1{font-size:1.8rem}.features{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<!-- SVG Icon Sprite -->
 <svg style="display:none" xmlns="http://www.w3.org/2000/svg" id="icon-sprite">
   <g id="i-nexus"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 7l10 5 10-5"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g>
   <g id="i-send"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></g>
-  <g id="i-sparkle"><path d="M12 3l1.5 5L18 9l-4.5 1L12 15l-1.5-5L6 9l4.5-1z"/><path d="M4 18l2-2 2 2-2 2z"/><path d="M18 15l2-1 2 1-2 2z"/></g>
   <g id="i-user"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
+  <g id="i-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></g>
+  <g id="i-brain"><circle cx="12" cy="12" r="10"/><path d="M12 2a15 15 0 0 1 1 20M12 2a15 15 0 0 0-1 20M2 12h20"/></g>
+  <g id="i-msg"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></g>
+  <g id="i-lock"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>
   <g id="i-chevron-right"><polyline points="9 18 15 12 9 6"/></g>
 </svg>
 
-<div class="app">
-  <div class="header">
-    <div class="header-left">
-      <div class="logo"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
-      <div>
-        <div class="header-title">NEXUS v7</div>
-        <div class="header-sub"><span class="status-dot"></span>Online</div>
-      </div>
+<div class="hero">
+  <div class="logo-mark"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
+  <h1>NEXUS</h1>
+  <p>Autonomer KI-Agent mit Seele. Denkt, lernt, handelt — auf deine Art.</p>
+  <div class="hero-sub">Open-Source - Privat - Kein Tracking</div>
+  <a href="/chat" class="cta">
+    <svg viewBox="0 0 24 24"><use href="#i-msg"/></svg>
+    Jetzt testen
+  </a>
+</div>
+
+<div class="features">
+  <div class="feat">
+    <div class="feat-icon"><svg viewBox="0 0 24 24"><use href="#i-brain"/></svg></div>
+    <h3>Eigene Persoenlichkeit</h3>
+    <p>Nexus hat eine Seele — keine generische KI, sondern ein Agent mit Charakter, der sich an dich erinnert.</p>
+  </div>
+  <div class="feat">
+    <div class="feat-icon"><svg viewBox="0 0 24 24"><use href="#i-lock"/></svg></div>
+    <h3>Privat &amp; Gesichert</h3>
+    <p>Einladungscodes schuetzen den Zugang. Deine Gespraeche bleiben privat — kein Tracking, keine Werbung.</p>
+  </div>
+  <div class="feat">
+    <div class="feat-icon"><svg viewBox="0 0 24 24"><use href="#i-shield"/></svg></div>
+    <h3>Fair genutzter Zugang</h3>
+    <p>30 Nachrichten pro Stunde, fair geteilt. Kein Massen-Spam, kein Missbrauch.</p>
+  </div>
+</div>
+
+<div class="section">
+  <h2>So funktioniert es</h2>
+  <p class="sub">Drei Schritte zu deinem persoenlichen KI-Assistenten.</p>
+  <div class="features">
+    <div class="feat">
+      <div class="feat-icon" style="background:linear-gradient(135deg,#00b894,#00cec9)"><span style="color:#fff;font-weight:700;font-size:18px">1</span></div>
+      <h3>Einladungscode</h3>
+      <p>Hol dir einen Code vom Server-Admin auf Discord. Privat heisst privat.</p>
     </div>
-    <div style="font-size:12px;color:var(--text-muted);" id="session-info"></div>
+    <div class="feat">
+      <div class="feat-icon" style="background:linear-gradient(135deg,#fdcb6e,#e17055)"><span style="color:#fff;font-weight:700;font-size:18px">2</span></div>
+      <h3>Namen nennen</h3>
+      <p>Sag Nexus wie du heisst. Er merkt sich dich — persoenlich und individuell.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon" style="background:linear-gradient(135deg,var(--accent3),var(--accent))"><span style="color:#fff;font-weight:700;font-size:18px">3</span></div>
+      <h3>Chatten</h3>
+      <p>Rede mit Nexus wie mit einem Freund. Er lernt deinen Stil und behaelt den Kontext.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="limit-bar">
+    <h4>Fair-Use Limit</h4>
+    <span class="limit-num">30</span>
+    <p>Nachrichten pro Stunde pro Nutzer.<br>Reichlich fuer Gespraeche, Schutz gegen Missbrauch.</p>
+  </div>
+</div>
+
+<footer>NEXUS v7 - Open Source KI-Agent - <a href="https://github.com/***REMOVED***/nexus-toti">GitHub</a></footer>
+</body></html>'''
+
+
+def get_chat_html() -> str:
+    """Chat UI — invite gate + name + chat. Dark theme, SVG icons."""
+    return '''<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS Chat</title>
+<style>
+:root{--bg:#07070d;--bg2:#0e0e18;--bg3:#151524;--bg4:#1c1c32;--text:#e4e4f0;--text2:#9494b0;--muted:#5c5c78;--accent:#6c5ce7;--accent2:#a29bfe;--accent3:#4f46e5;--border:#1f1f35;--user:#1e1e3a;--nexus:#12122a;--green:#00b894;--red:#ff6b6b;--radius:12px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+.app{display:flex;flex-direction:column;height:100vh;max-width:820px;margin:0 auto}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.hdr-l{display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:10px;display:flex;align-items:center;justify-content:center}
+.logo svg{width:20px;height:20px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hdr-t{font-size:17px;font-weight:700;letter-spacing:.4px}
+.hdr-s{font-size:11px;color:var(--muted);margin-top:1px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.badge{font-size:11px;padding:3px 10px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(12px)}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:18px;padding:36px 32px;max-width:380px;width:92%;text-align:center}
+.card .logo{width:52px;height:52px;margin:0 auto 18px}
+.card h2{font-size:20px;margin-bottom:6px}
+.card p{color:var(--text2);font-size:14px;margin-bottom:20px;line-height:1.55}
+.inp{width:100%;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:15px;outline:none;transition:border .2s}
+.inp:focus{border-color:var(--accent)}
+.btn{width:100%;padding:12px;margin-top:14px;background:linear-gradient(135deg,var(--accent3),var(--accent));color:#fff;border:none;border-radius:var(--radius);font-size:15px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(108,92,231,.4)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+.err{color:var(--red);font-size:13px;margin-top:8px;display:none}
+.msgs{flex:1;overflow-y:auto;padding:18px;scroll-behavior:smooth}
+.msgs::-webkit-scrollbar{width:5px}.msgs::-webkit-scrollbar-track{background:transparent}.msgs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.welcome{text-align:center;padding:36px 16px;color:var(--muted)}
+.welcome h3{font-size:18px;color:var(--text2);margin-bottom:6px}
+.welcome p{font-size:14px;line-height:1.6}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.chip{padding:7px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;color:var(--text2);font-size:13px;cursor:pointer;transition:all .2s}
+.chip:hover{border-color:var(--accent);color:var(--text)}
+.msg{display:flex;gap:10px;margin-bottom:14px;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.msg.user{flex-direction:row-reverse}
+.av{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.msg.user .av{background:linear-gradient(135deg,#00b894,#00cec9)}
+.msg.nexus .av{background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.av svg{width:16px;height:16px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bub{max-width:72%;padding:11px 15px;border-radius:var(--radius);line-height:1.65;font-size:14px}
+.msg.user .bub{background:var(--user);border-bottom-right-radius:4px}
+.msg.nexus .bub{background:var(--nexus);border:1px solid var(--border);border-bottom-left-radius:4px}
+.bub code{background:rgba(108,92,231,.15);padding:1px 5px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-size:13px}
+.bub pre{background:var(--bg);padding:10px;border-radius:8px;overflow-x:auto;margin:6px 0;font-size:13px}
+.mtime{font-size:10px;color:var(--muted);margin-top:3px}
+.typing{display:none;padding:4px 18px;align-items:center;gap:10px}
+.typing.on{display:flex}
+.typ-bub{display:inline-flex;align-items:center;gap:5px;padding:11px 16px;background:var(--nexus);border:1px solid var(--border);border-radius:var(--radius);border-bottom-left-radius:4px}
+.typ-bub .d{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:bounce 1.4s infinite ease-in-out}
+.typ-bub .d:nth-child(2){animation-delay:.16s}.typ-bub .d:nth-child(3){animation-delay:.32s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-7px);opacity:1}}
+.bar{padding:12px 18px;border-top:1px solid var(--border);background:var(--bg2)}
+.bar-row{display:flex;gap:8px;align-items:flex-end}
+.txt{flex:1;padding:11px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;outline:none;resize:none;max-height:110px;line-height:1.45;font-family:inherit;transition:border .2s}
+.txt:focus{border-color:var(--accent)}.txt::placeholder{color:var(--muted)}
+.send{padding:11px;background:linear-gradient(135deg,var(--accent3),var(--accent));border:none;border-radius:var(--radius);cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center}
+.send svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.send:hover{box-shadow:0 4px 16px rgba(108,92,231,.4)}
+.send:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.send.spin svg{animation:spin .8s linear infinite}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.rate{font-size:11px;color:var(--muted);text-align:center;padding:4px 0 0}
+@media(max-width:600px){.bub{max-width:86%}.hdr{padding:10px 14px}.msgs{padding:10px}.bar{padding:10px 12px}}
+.msgs{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg" id="icon-sprite">
+  <g id="i-nexus"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 7l10 5 10-5"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g>
+  <g id="i-send"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></g>
+  <g id="i-user"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
+  <g id="i-lock"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>
+  <g id="i-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></g>
+</svg>
+
+<div class="app">
+  <div class="hdr">
+    <div class="hdr-l">
+      <div class="logo"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
+      <div><div class="hdr-t">NEXUS</div><div class="hdr-s"><span class="dot"></span>Online</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="badge" id="rate-badge">30 / 30</span>
+      <span style="font-size:12px;color:var(--muted)" id="uname"></span>
+    </div>
   </div>
 
-  <div class="messages" id="messages">
+  <div class="msgs" id="msgs">
     <div class="welcome" id="welcome">
       <h3>Willkommen bei NEXUS</h3>
-      <p>Dein KI-Agent mit Seele. Frag mich alles.</p>
-      <div class="suggestions">
-        <div class="suggestion" onclick="sendMsg('Wer bist du?')">Wer bist du?</div>
-        <div class="suggestion" onclick="sendMsg('Was kannst du machen?')">Was kannst du?</div>
-        <div class="suggestion" onclick="sendMsg('Erklaer mir das Projekt')">Das Projekt</div>
-        <div class="suggestion" onclick="sendMsg('Schreibe ein Python-Skript')">Code schreiben</div>
+      <p>Dein KI-Agent mit Seele. Alles, was du mir sagst, bleibt zwischen uns.</p>
+      <div class="chips">
+        <div class="chip" onclick="sendMsg('Wer bist du?')">Wer bist du?</div>
+        <div class="chip" onclick="sendMsg('Was kannst du?')">Was kannst du?</div>
+        <div class="chip" onclick="sendMsg('Erklaer mir das Projekt')">Projekt</div>
+        <div class="chip" onclick="sendMsg('Schreibe ein Python-Skript')">Code</div>
       </div>
     </div>
   </div>
 
-  <div class="typing-indicator" id="typing">
-    <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#a29bfe);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-      <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-nexus"/></svg>
+  <div class="typing" id="typing">
+    <div class="av" style="width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><use href="#i-nexus"/></svg>
     </div>
-    <div class="typing-bubble">
-      <div class="dot"></div>
-      <div class="dot"></div>
-      <div class="dot"></div>
-    </div>
+    <div class="typ-bub"><div class="d"></div><div class="d"></div><div class="d"></div></div>
   </div>
 
-  <div class="input-area">
-    <div class="input-wrapper">
-      <textarea class="msg-input" id="input" placeholder="Nachricht an NEXUS..." rows="1"
-                onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="send-btn" id="send-btn" onclick="sendMessage()"><svg viewBox="0 0 24 24"><use href="#i-send"/></svg></button>
+  <div class="bar">
+    <div class="bar-row">
+      <textarea class="txt" id="input" placeholder="Nachricht an NEXUS..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send" id="send-btn" onclick="sendMessage()"><svg viewBox="0 0 24 24"><use href="#i-send"/></svg></button>
     </div>
+    <div class="rate" id="rate-info">30 Nachrichten verbleibend diese Stunde</div>
   </div>
 </div>
 
-<div class="name-overlay" id="invite-overlay">
-  <div class="name-card">
-    <div class="logo" style="width:56px;height:56px;margin:0 auto 16px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
+<div class="overlay" id="invite-overlay">
+  <div class="card">
+    <div class="logo" style="width:52px;height:52px;margin:0 auto 18px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
     <h2>NEXUS Zugang</h2>
-    <p>Dieser KI-Agent ist privat.<br>Bitte gib deinen Einladungscode ein.</p>
-    <input type="text" class="name-input" id="invite-input" placeholder="Einladungscode..."
-           onkeydown="if(event.key==='Enter')document.getElementById('invite-btn').click()" autofocus>
-    <div id="invite-error" style="color:var(--error);font-size:13px;margin-top:8px;display:none;">Ungueltiger Code. Frag einen Admin auf Discord.</div>
-    <button class="name-btn" id="invite-btn" onclick="verifyInvite()">Freischalten</button>
+    <p>Dieser KI-Agent ist privat und per Einladung geschuetzt.<br>Frag einen Admin auf Discord fuer einen Code.</p>
+    <input type="text" class="inp" id="invite-input" placeholder="Einladungscode..." onkeydown="if(event.key==='Enter')document.getElementById('invite-btn').click()" autofocus>
+    <div class="err" id="invite-error">Ungueltiger Code. Frag einen Admin auf Discord.</div>
+    <button class="btn" id="invite-btn" onclick="verifyInvite()">Freischalten</button>
   </div>
 </div>
 
-<div class="name-overlay" id="name-overlay" style="display:none;">
-  <div class="name-card">
-    <div class="logo" style="width:56px;height:56px;margin:0 auto 16px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
+<div class="overlay" id="name-overlay" style="display:none">
+  <div class="card">
+    <div class="logo" style="width:52px;height:52px;margin:0 auto 18px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
     <h2>Willkommen bei NEXUS</h2>
     <p>Open-Source KI-Agent mit Seele.<br>Wie moechtest du heissen?</p>
-    <input type="text" class="name-input" id="name-input" placeholder="Dein Name..."
-           onkeydown="if(event.key==='Enter')document.getElementById('name-btn').click()" autofocus>
-    <button class="name-btn" id="name-btn" onclick="setName()">Los gehts</button>
+    <input type="text" class="inp" id="name-input" placeholder="Dein Name..." onkeydown="if(event.key==='Enter')document.getElementById('name-btn').click()">
+    <button class="btn" id="name-btn" onclick="setName()">Los gehts</button>
   </div>
 </div>
 
 <script>
-const API = window.location.origin;
+const API = window.location.origin.replace(/\/$/, '');
 let sessionId = null;
 let userName = localStorage.getItem('nexus_user') || '';
 let inviteToken = localStorage.getItem('nexus_invite') || '';
-let ws = null;
-let useWS = true;
+let rateLimit = 30;
 
-// Check if already invited (token stored locally)
+// Already invited?
 if (inviteToken) {
   document.getElementById('invite-overlay').style.display = 'none';
   if (userName) {
     sessionId = localStorage.getItem('nexus_session') || null;
     document.getElementById('name-overlay').style.display = 'none';
-    document.getElementById('session-info').textContent = userName;
+    document.getElementById('uname').textContent = userName;
   } else {
     document.getElementById('name-overlay').style.display = 'flex';
   }
 }
 
 async function verifyInvite() {
-  const input = document.getElementById('invite-input');
-  const code = input.value.trim();
+  const code = document.getElementById('invite-input').value.trim();
   if (!code) return;
-
   const btn = document.getElementById('invite-btn');
-  btn.disabled = true;
-  btn.textContent = 'Pruefe...';
-
+  btn.disabled = true; btn.textContent = 'Pruefe...';
   try {
     const res = await fetch(API + '/api/invite', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({code: code}),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code})
     });
     const data = await res.json();
     if (data.valid) {
       inviteToken = data.token;
+      rateLimit = data.daily_limit || 30;
       localStorage.setItem('nexus_invite', inviteToken);
       document.getElementById('invite-overlay').style.display = 'none';
       document.getElementById('name-overlay').style.display = 'flex';
       document.getElementById('name-input').focus();
     } else {
-      document.getElementById('invite-error').style.display = 'block';
+      const errEl = document.getElementById('invite-error');
+      errEl.textContent = data.error || 'Ungueltiger Code';
+      errEl.style.display = 'block';
     }
-  } catch (e) {
-    document.getElementById('invite-error').style.display = 'block';
-    document.getElementById('invite-error').textContent = 'Verbindungsfehler: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Freischalten';
-  }
+  } catch(e) {
+    const errEl = document.getElementById('invite-error');
+    errEl.textContent = 'Verbindungsfehler: ' + e.message;
+    errEl.style.display = 'block';
+  } finally { btn.disabled = false; btn.textContent = 'Freischalten'; }
 }
 
 function setName() {
-  const input = document.getElementById('name-input');
-  const name = input.value.trim();
+  const name = document.getElementById('name-input').value.trim();
   if (!name) return;
   userName = name;
   localStorage.setItem('nexus_user', name);
   document.getElementById('name-overlay').style.display = 'none';
-  document.getElementById('session-info').textContent = name;
+  document.getElementById('uname').textContent = name;
+  document.getElementById('input').focus();
 }
 
-function formatTime(ts) {
-  const d = new Date(ts ? ts * 1000 : Date.now());
-  return d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+function fmtTime(ts) {
+  return new Date(ts ? ts*1000 : Date.now()).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+function fmtMsg(t) {
+  let h = esc(t);
+  h = h.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g,'<pre><code>$2</code></pre>');
+  h = h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h = h.replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>');
+  h = h.replace(/\\*([^*]+)\\*/g,'<em>$1</em>');
+  h = h.replace(/\\n/g,'<br>');
+  return h;
 }
 
-function formatMessage(text) {
-  // Basic markdown: code blocks, inline code, bold, italic
-  let html = escapeHtml(text);
-  // Code blocks
-  html = html.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g, '<pre><code>$2</code></pre>');
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
-  html = html.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-  // Italic
-  html = html.replace(/\\*([^*]+)\\*/g, '<em>$1</em>');
-  // Line breaks
-  html = html.replace(/\\n/g, '<br>');
-  return html;
+function addMsg(role, content) {
+  const c = document.getElementById('msgs');
+  const w = document.getElementById('welcome');
+  if (w) w.style.display = 'none';
+  const m = document.createElement('div');
+  m.className = 'msg ' + role;
+  const svg = role === 'nexus'
+    ? '<svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg>'
+    : '<svg viewBox="0 0 24 24"><use href="#i-user"/></svg>';
+  m.innerHTML = '<div class="av">'+svg+'</div><div><div class="bub">'+fmtMsg(content)+'</div><div class="mtime">'+fmtTime()+'</div></div>';
+  c.appendChild(m);
+  c.scrollTop = c.scrollHeight;
 }
 
-function addMessage(role, content) {
-  const container = document.getElementById('messages');
-  const welcome = document.getElementById('welcome');
-  if (welcome) welcome.style.display = 'none';
-
-  const msg = document.createElement('div');
-  msg.className = `msg ${role}`;
-
-  const avatarSvg = role === 'nexus'
-    ? '<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-nexus"/></svg>'
-    : '<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-user"/></svg>';
-
-  msg.innerHTML = `
-    <div class="msg-avatar">${avatarSvg}</div>
-    <div>
-      <div class="msg-bubble">${formatMessage(content)}</div>
-      <div class="msg-time">${formatTime()}</div>
-    </div>
-  `;
-  container.appendChild(msg);
-  container.scrollTop = container.scrollHeight;
+function setTyping(on) {
+  document.getElementById('typing').className = on ? 'typing on' : 'typing';
 }
 
-function setTyping(show) {
-  document.getElementById('typing').className = show ? 'typing-indicator active' : 'typing-indicator';
+function updateRate(rem) {
+  rateLimit = rem;
+  document.getElementById('rate-badge').textContent = rem + ' / 30';
+  document.getElementById('rate-info').textContent = rem + ' Nachrichten verbleibend diese Stunde';
 }
 
 async function sendMessage() {
-  const input = document.getElementById('input');
-  const text = input.value.trim();
+  const inp = document.getElementById('input');
+  const text = inp.value.trim();
   if (!text) return;
-
-  input.value = '';
-  autoResize(input);
-  addMessage('user', text);
+  inp.value = ''; autoResize(inp);
+  addMsg('user', text);
   setTyping(true);
   document.getElementById('send-btn').disabled = true;
 
   try {
     const res = await fetch(API + '/api/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        message: text,
-        session_id: sessionId,
-        user_name: userName,
-        invite_token: inviteToken,
-      }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:text, session_id:sessionId, user_name:userName, invite_token:inviteToken})
     });
-    const data = await res.json();
-
     if (res.status === 403) {
-      // Token expired — show invite gate again
       localStorage.removeItem('nexus_invite');
       inviteToken = '';
       document.getElementById('invite-overlay').style.display = 'flex';
       return;
     }
-
-    if (data.session_id) {
-      sessionId = data.session_id;
-      localStorage.setItem('nexus_session', sessionId);
+    if (res.status === 429) {
+      addMsg('nexus', 'Rate-Limit erreicht — maximal 30 Nachrichten pro Stunde. Bitte warte einen Moment.');
+      return;
     }
-
-    addMessage('nexus', data.response);
-  } catch (e) {
-    addMessage('nexus', 'Verbindungsfehler: ' + e.message);
+    const data = await res.json();
+    if (data.session_id) { sessionId = data.session_id; localStorage.setItem('nexus_session', sessionId); }
+    if (data.remaining !== undefined) updateRate(data.remaining);
+    addMsg('nexus', data.response);
+  } catch(e) {
+    addMsg('nexus', 'Verbindungsfehler: ' + e.message);
   } finally {
     setTyping(false);
     document.getElementById('send-btn').disabled = false;
-    input.focus();
+    inp.focus();
   }
 }
 
-function sendMsg(text) {
-  document.getElementById('input').value = text;
-  sendMessage();
-}
+function sendMsg(t) { document.getElementById('input').value = t; sendMessage(); }
+function handleKey(e) { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
+function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,110)+'px'; }
 
-function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-}
-
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-}
-
-// Focus input
 document.getElementById('input').focus();
-if (!userName) {
-  setTimeout(() => document.getElementById('name-input').focus(), 100);
-}
+if (!inviteToken) { setTimeout(()=>document.getElementById('invite-input').focus(),100); }
+else if (!userName) { setTimeout(()=>document.getElementById('name-input').focus(),100); }
 </script>
-</body>
-</html>'''
+</body></html>'''
 
 
 def main():
