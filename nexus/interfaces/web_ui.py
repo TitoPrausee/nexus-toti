@@ -117,6 +117,11 @@ def create_app(config: dict = None) -> FastAPI:
 
         try:
             response = agent.process(message, user_id=session.id)
+            
+            # If response is empty/error, give a friendly fallback
+            if not response or not isinstance(response, str):
+                response = "Ich konnte leider keine Verbindung zum Sprachmodell herstellen. Bitte versuche es spaeter nochmal."
+            
             session.history.append({"role": "user", "content": message, "ts": __import__("time").time()})
             session.history.append({"role": "assistant", "content": response, "ts": __import__("time").time()})
 
