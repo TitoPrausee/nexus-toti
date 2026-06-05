@@ -9,6 +9,9 @@ aiohttp>=3.9
 # Telegram
 telethon>=1.34
 
+# Discord (contributor onboarding bot)
+discord.py>=2.3
+
 # Web search (optional — fallback uses requests)
 duckduckgo-search>=4.0
 

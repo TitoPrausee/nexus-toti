@@ -4,9 +4,10 @@ NEXUS v7 — Main Entry Point
 One agent. Soul-driven. Tool-empowered. Stream-fast.
 
 Usage:
-    python nexus.py              # CLI mode
-    python nexus.py --telegram   # Telegram bot mode
-    python nexus.py --test       # Quick self-test
+    python nexus.py                    # CLI mode
+    python nexus.py --telegram         # Telegram bot mode
+    python nexus.py --contributor-bot  # Discord contributor bot mode
+    python nexus.py --test             # Quick self-test
 """
 
 import os
@@ -53,6 +54,12 @@ def run_telegram(config: dict):
         asyncio.run(bot.start())
     except KeyboardInterrupt:
         bot.stop()
+
+
+def run_contributor_bot():
+    """Run Discord contributor onboarding bot."""
+    from nexus.contributor_bot import main as bot_main
+    bot_main()
 
 
 def run_test(config: dict):
@@ -104,6 +111,7 @@ def run_test(config: dict):
 def main():
     parser = argparse.ArgumentParser(description="NEXUS v7 — Autonomous AI Agent")
     parser.add_argument("--telegram", action="store_true", help="Run as Telegram bot")
+    parser.add_argument("--contributor-bot", action="store_true", help="Run Discord contributor onboarding bot")
     parser.add_argument("--test", action="store_true", help="Run self-test")
     parser.add_argument("--config", default="config.yaml", help="Config file path")
     parser.add_argument("--log-level", default="INFO", help="Log level")
@@ -116,6 +124,8 @@ def main():
         run_test(config)
     elif args.telegram:
         run_telegram(config)
+    elif args.contributor_bot:
+        run_contributor_bot()
     else:
         run_cli(config)
 
