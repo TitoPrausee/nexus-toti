@@ -46,6 +46,7 @@ else:
         "toti-friend": "Freund",
         "alpha-test": "Alpha-Tester",
         "nexus-admin": "Admin",
+        "nexus-test": "Test-User",
     }
 
 # Runtime state
@@ -97,13 +98,13 @@ ADMIN_CODES = {"nexus-admin"}
 
 def _check_rate_limit(invite_code: str) -> bool:
     """Return True if within rate limit. Admin codes have no limit."""
-    if invite_code in ADMIN_CODES:
+    max_req, window = CODE_RATE_OVERRIDES.get(invite_code, (RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW))
+    if max_req == 0:
         return True
     now = time.time()
     timestamps = _rate_limits.setdefault(invite_code, [])
-    # Remove old entries
-    _rate_limits[invite_code] = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
-    return len(_rate_limits[invite_code]) < RATE_LIMIT_REQUESTS
+    _rate_limits[invite_code] = [t for t in timestamps if now - t < window]
+    return len(_rate_limits[invite_code]) < max_req
 
 
 def create_app(config: dict = None) -> FastAPI:
@@ -147,9 +148,17 @@ def create_app(config: dict = None) -> FastAPI:
         if code in INVITE_CODES:
             token = hashlib.sha256(f"{code}:{uuid.uuid4()}".encode()).hexdigest()[:24]
             _valid_tokens[token] = code
-            limit = 0 if code in ADMIN_CODES else RATE_LIMIT_REQUESTS
-            return {"valid": True, "token": token, "label": INVITE_CODES[code], "daily_limit": limit}
+            max_req, window = CODE_RATE_OVERRIDES.get(code, (RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW))
+            return {"valid": True, "token": token, "label": INVITE_CODES[code], "daily_limit": max_req, "window": window}
         return JSONResponse({"valid": False, "error": "Ungueltiger Code"}, status_code=403)
+
+    @app.post("/api/logout")
+    async def logout(request: Request):
+        body = await request.json()
+        token = body.get("invite_token", "")
+        if token in _valid_tokens:
+            del _valid_tokens[token]
+        return {"ok": True}
 
     @app.post("/api/chat")
     async def chat_api(request: Request):
@@ -212,7 +221,8 @@ def create_app(config: dict = None) -> FastAPI:
             if len(sessions.sessions) > 50:
                 sessions.cleanup()
 
-            remaining = RATE_LIMIT_REQUESTS - len(_rate_limits.get(invite_code, []))
+            max_req, window = CODE_RATE_OVERRIDES.get(invite_code, (RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW))
+            remaining = max_req - len(_rate_limits.get(invite_code, [])) if max_req > 0 else -1
             return {
                 "response": response,
                 "session_id": session.id,
@@ -436,6 +446,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <div style="display:flex;align-items:center;gap:10px">
       <span class="badge" id="rate-badge">30 / 30</span>
       <span style="font-size:12px;color:var(--muted)" id="uname"></span>
+      <button onclick="logoutUser()" style="background:none;border:1px solid var(--muted);color:var(--muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;" title="Abmelden">
+        <svg style="vertical-align:middle;width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Logout
+      </button>
     </div>
   </div>
 
@@ -464,7 +478,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
       <textarea class="txt" id="input" placeholder="Nachricht an NEXUS..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
       <button class="send" id="send-btn" onclick="sendMessage()"><svg viewBox="0 0 24 24"><use href="#i-send"/></svg></button>
     </div>
-    <div class="rate" id="rate-info">30 Nachrichten verbleibend diese Stunde</div>
+    <div class="rate" id="rate-info">30 Nachrichten verbleibend</div>
   </div>
 </div>
 
@@ -495,13 +509,14 @@ let sessionId = null;
 let userName = localStorage.getItem('nexus_user') || '';
 let inviteToken = localStorage.getItem('nexus_invite') || '';
 let rateLimit = 30;
+let rateWindow = 3600;
+let isAdmin = false;
 
 // Already invited?
 if (inviteToken) {
   document.getElementById('invite-overlay').style.display = 'none';
   if (userName) {
     sessionId = localStorage.getItem('nexus_session') || null;
-    document.getElementById('name-overlay').style.display = 'none';
     document.getElementById('uname').textContent = userName;
   } else {
     document.getElementById('name-overlay').style.display = 'flex';
@@ -522,6 +537,8 @@ async function verifyInvite() {
     if (data.valid) {
       inviteToken = data.token;
       rateLimit = data.daily_limit === 0 ? Infinity : (data.daily_limit || 30);
+      rateWindow = data.window || 3600;
+      isAdmin = data.daily_limit === 0;
       localStorage.setItem('nexus_invite', inviteToken);
       document.getElementById('invite-overlay').style.display = 'none';
       document.getElementById('name-overlay').style.display = 'flex';
@@ -582,10 +599,45 @@ function setTyping(on) {
   document.getElementById('typing').className = on ? 'typing on' : 'typing';
 }
 
+function fmtLimit() {
+  if (isAdmin) return '\u221e';
+  if (rateLimit === Infinity) return '\u221e';
+  return rateLimit;
+}
+function fmtWindow() {
+  if (rateWindow >= 3600) return Math.round(rateWindow/3600) + 'h';
+  if (rateWindow >= 60) return Math.round(rateWindow/60) + 'min';
+  return rateWindow + 's';
+}
+
 function updateRate(rem) {
   rateLimit = rem;
-  document.getElementById('rate-badge').textContent = rem + ' / 30';
-  document.getElementById('rate-info').textContent = rem + ' Nachrichten verbleibend diese Stunde';
+  if (isAdmin || rem === Infinity) {
+    document.getElementById('rate-badge').textContent = '\u221e';
+    document.getElementById('rate-info').textContent = 'Unbeschraenkt';
+  } else {
+    document.getElementById('rate-badge').textContent = rem + ' / ' + fmtLimit();
+    document.getElementById('rate-info').textContent = rem + ' Nachrichten verbleibend (Fenster: ' + fmtWindow() + ')';
+  }
+}
+
+async function logoutUser() {
+  try {
+    await fetch(API + '/api/logout', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({invite_token: inviteToken})
+    });
+  } catch(e) {}
+  localStorage.removeItem('nexus_invite');
+  localStorage.removeItem('nexus_user');
+  localStorage.removeItem('nexus_session');
+  inviteToken = ''; userName = ''; sessionId = '';
+  rateLimit = 30; rateWindow = 3600; isAdmin = false;
+  document.getElementById('invite-overlay').style.display = 'flex';
+  document.getElementById('name-overlay').style.display = 'none';
+  document.getElementById('uname').textContent = '';
+  document.getElementById('msgs').innerHTML = '';
+  const w = document.getElementById('welcome'); if(w) w.style.display = '';
 }
 
 async function sendMessage() {
@@ -609,12 +661,13 @@ async function sendMessage() {
       return;
     }
     if (res.status === 429) {
-      addMsg('nexus', 'Rate-Limit erreicht — maximal 30 Nachrichten pro Stunde. Bitte warte einen Moment.');
+      addMsg('nexus', 'Rate-Limit erreicht — bitte warte einen Moment.');
       return;
     }
     const data = await res.json();
     if (data.session_id) { sessionId = data.session_id; localStorage.setItem('nexus_session', sessionId); }
-    if (data.remaining !== undefined) updateRate(data.remaining);
+    if (data.remaining !== undefined && data.remaining >= 0) updateRate(data.remaining);
+    else if (data.remaining === -1) { isAdmin = true; rateLimit = Infinity; updateRate(Infinity); }
     addMsg('nexus', data.response);
   } catch(e) {
     addMsg('nexus', 'Verbindungsfehler: ' + e.message);
