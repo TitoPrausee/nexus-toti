@@ -10,7 +10,7 @@ nexus:
 # ─── LLM ROUTING ────────────────────────────────────────
 llm:
   # Ollama Cloud — our real models
-  base_url: "https://api.ollama.ai"
+  base_url: "http://localhost:11434"  # Local Ollama (cloud models via ollama.com proxy)
   local_url: "http://localhost:11434"
   api_key_env: "OLLAMA_API_KEY"
   mode: "cloud"  # cloud | local | hybrid
