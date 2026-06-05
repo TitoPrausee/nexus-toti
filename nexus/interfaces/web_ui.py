@@ -354,7 +354,7 @@ footer{text-align:center;padding:40px 20px;color:var(--muted);font-size:.85rem;b
 
 
 def get_chat_html() -> str:
-    """Chat UI — invite gate + name + chat. Dark theme, SVG icons."""
+    """Chat UI — invite gate + name + chat. Modern clean theme, auto-preview for code."""
     return '''<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -362,7 +362,7 @@ def get_chat_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NEXUS Chat</title>
 <style>
-:root{--bg:#07070d;--bg2:#0e0e18;--bg3:#151524;--bg4:#1c1c32;--text:#e4e4f0;--text2:#9494b0;--muted:#5c5c78;--accent:#6c5ce7;--accent2:#a29bfe;--accent3:#4f46e5;--border:#1f1f35;--user:#1e1e3a;--nexus:#12122a;--green:#00b894;--red:#ff6b6b;--radius:12px}
+:root{--bg:#0a0a12;--bg2:#11111d;--bg3:#1a1a2e;--bg4:#222240;--text:#e8e8f0;--text2:#a0a0c0;--muted:#606080;--accent:#7c6cf0;--accent2:#b8b0ff;--accent3:#5b4fe0;--border:#2a2a44;--user:#1a1a3a;--nexus:#141428;--green:#00d4aa;--red:#ff6b6b;--code-bg:#0d0d1a;--radius:16px;--shadow:0 4px 20px rgba(0,0,0,.4)}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 .app{display:flex;flex-direction:column;height:100vh;max-width:820px;margin:0 auto}
@@ -394,18 +394,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
 .chip{padding:7px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;color:var(--text2);font-size:13px;cursor:pointer;transition:all .2s}
 .chip:hover{border-color:var(--accent);color:var(--text)}
-.msg{display:flex;gap:10px;margin-bottom:14px;animation:fadeUp .3s ease}
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.msg{display:flex;gap:10px;margin-bottom:14px;animation:msgIn .4s cubic-bezier(.16,1,.3,1)}
+@keyframes msgIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 .msg.user{flex-direction:row-reverse}
 .av{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .msg.user .av{background:linear-gradient(135deg,#00b894,#00cec9)}
 .msg.nexus .av{background:linear-gradient(135deg,var(--accent),var(--accent2))}
 .av svg{width:16px;height:16px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.bub{max-width:72%;padding:11px 15px;border-radius:var(--radius);line-height:1.65;font-size:14px}
-.msg.user .bub{background:var(--user);border-bottom-right-radius:4px}
+.bub{max-width:80%;padding:12px 16px;border-radius:var(--radius);line-height:1.65;font-size:14px}
+.msg.user .bub{background:linear-gradient(135deg,#1a1a3a,#222250);border-bottom-right-radius:4px}
 .msg.nexus .bub{background:var(--nexus);border:1px solid var(--border);border-bottom-left-radius:4px}
-.bub code{background:rgba(108,92,231,.15);padding:1px 5px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-size:13px}
-.bub pre{background:var(--bg);padding:10px;border-radius:8px;overflow-x:auto;margin:6px 0;font-size:13px}
+.bub code{background:rgba(124,108,240,.18);padding:1px 6px;border-radius:4px;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:13px;color:var(--accent2)}
+.bub pre{background:var(--code-bg);padding:0;overflow:hidden;margin:8px 0;border-radius:10px;border:1px solid var(--border)}
+.code-hdr{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--bg3);border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);font-family:'SF Mono',monospace}
+.code-hdr .lang{color:var(--accent2);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px}
+.copy-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;transition:all .2s;font-family:inherit}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent2)}
+.code-body{padding:12px;overflow-x:auto;font-size:13px;line-height:1.55;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;color:var(--text2)}
+.preview-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.preview-split .code-side{min-width:0}
+.preview-split .preview-side{min-width:0;background:#fff;border-left:1px solid var(--border)}
+.preview-split .preview-side iframe{width:100%;height:100%;min-height:300px;border:0}
+.preview-toggle{display:inline-flex;align-items:center;gap:4px;padding:4px 12px;margin:4px 0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--accent2);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s}
+.preview-toggle:hover{border-color:var(--accent);background:rgba(124,108,240,.1)}
+.preview-toggle svg{width:14px;height:14px}
 .mtime{font-size:10px;color:var(--muted);margin-top:3px}
 .typing{display:none;padding:4px 18px;align-items:center;gap:10px}
 .typing.on{display:flex}
@@ -424,10 +436,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .send.spin svg{animation:spin .8s linear infinite}
 @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 .rate{font-size:11px;color:var(--muted);text-align:center;padding:4px 0 0}
-.preview-btn{display:inline-block;padding:4px 12px;margin:4px 0 2px;background:linear-gradient(135deg,var(--accent3),var(--accent));color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:all .2s}
-.preview-btn:hover{opacity:.85;transform:translateY(-1px)}
-.preview-container{margin:0 0 8px}
-@media(max-width:600px){.bub{max-width:86%}.hdr{padding:10px 14px}.msgs{padding:10px}.bar{padding:10px 12px}}
+@media(max-width:600px){.bub{max-width:92%}.preview-split{grid-template-columns:1fr}.hdr{padding:10px 14px}.msgs{padding:10px}.bar{padding:10px 12px}}
 .msgs{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 </style>
 </head>
@@ -438,6 +447,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
   <g id="i-user"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
   <g id="i-lock"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>
   <g id="i-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></g>
+  <g id="i-eye"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>
+  <g id="i-copy"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></g>
+  <g id="i-check"><polyline points="20 6 9 17 4 12"/></g>
 </svg>
 
 <div class="app">
@@ -576,11 +588,25 @@ function esc(t) { const d=document.createElement('div'); d.textContent=t; return
 
 function fmtMsg(t) {
   let h = esc(t);
-  // Code blocks with preview button for HTML/React
+  // Code blocks with auto-preview for HTML and copy button
   h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, function(match, lang, code) {
     const isPreviewable = /^(html|xml|svg|jsx|tsx|react)$/i.test(lang) || (lang === '' && /<!DOCTYPE|<html|<div|<body|<svg|<style|react/i.test(code));
-    const previewBtn = isPreviewable ? '<button class="preview-btn" onclick="togglePreview(this)">Vorschau</button>' : '';
-    return previewBtn + '<pre><code>' + code + '</code></pre>';
+    const langLabel = lang || 'code';
+    const rawCode = code.replace(/^\n+/, '').replace(/\n+$/, '');
+    const escapedCode = rawCode.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const copyId = 'cp_' + Math.random().toString(36).substr(2,6);
+    if (isPreviewable) {
+      let html = rawCode.trim();
+      if (!/<html/i.test(html)) {
+        html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;padding:16px;color:#111}</style></head><body>' + html + '</body></html>';
+      }
+      return '<div class="preview-split">' +
+        '<div class="code-side"><div class="code-hdr"><span class="lang">' + langLabel + '</span><button class="copy-btn" onclick="copyCode(this)" data-raw="' + btoa(unescape(encodeURIComponent(rawCode))) + '"><svg style="width:12px;height:12px;vertical-align:middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-copy"/></svg> Kopieren</button></div><pre class="code-body">' + escapedCode + '</pre></div>' +
+        '<div class="preview-side"><iframe sandbox="allow-scripts allow-same-origin" srcdoc="' + html.replace(/"/g,'&quot;').replace(/&/g,'&amp;') + '" style="width:100%;height:100%;min-height:300px;border:0"></iframe></div>' +
+        '</div>';
+    }
+    // Non-previewable code blocks: header + copy
+    return '<div class="code-hdr"><span class="lang">' + langLabel + '</span><button class="copy-btn" onclick="copyCode(this)" data-raw="' + btoa(unescape(encodeURIComponent(rawCode))) + '"><svg style="width:12px;height:12px;vertical-align:middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-copy"/></svg> Kopieren</button></div><pre class="code-body">' + escapedCode + '</pre>';
   });
   h = h.replace(/`([^`]+)`/g,'<code>$1</code>');
   h = h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
@@ -589,31 +615,12 @@ function fmtMsg(t) {
   return h;
 }
 
-function togglePreview(btn) {
-  const pre = btn.nextElementSibling;
-  if (!pre) return;
-  const code = pre.querySelector('code') ? pre.querySelector('code').textContent : pre.textContent;
-  // Check if preview container already exists
-  let container = btn.parentElement.querySelector('.preview-container');
-  if (container) {
-    container.remove();
-    btn.textContent = 'Vorschau';
-    return;
-  }
-  btn.textContent = 'Vorschau schliessen';
-  container = document.createElement('div');
-  container.className = 'preview-container';
-  // Wrap code in full HTML if it's a fragment
-  let html = code.trim();
-  if (!/<html/i.test(html)) {
-    html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;padding:16px}</style></head><body>' + html + '</body></html>';
-  }
-  const iframe = document.createElement('iframe');
-  iframe.sandbox = 'allow-scripts allow-same-origin';
-  iframe.style.cssText = 'width:100%;height:350px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px';
-  container.appendChild(iframe);
-  btn.parentElement.insertBefore(container, btn.nextSibling);
-  iframe.srcdoc = html;
+function copyCode(btn) {
+  const raw = decodeURIComponent(escape(atob(btn.dataset.raw)));
+  navigator.clipboard.writeText(raw).then(() => {
+    btn.innerHTML = '<svg style="width:12px;height:12px;vertical-align:middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-check"/></svg> Kopiert';
+    setTimeout(() => { btn.innerHTML = '<svg style="width:12px;height:12px;vertical-align:middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-copy"/></svg> Kopieren'; }, 2000);
+  });
 }
 
 function addMsg(role, content) {
