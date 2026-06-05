@@ -290,7 +290,7 @@ async def status_command(ctx, github_username: str = None):
     )
 
 
-@bot.command(name="help")
+@bot.command(name="nhelp")
 async def help_command(ctx):
     """Show contributor bot commands."""
     if ctx.channel.id != ONBOARDING_CH:
@@ -301,7 +301,7 @@ async def help_command(ctx):
     )
     embed.add_field(name="`!apply <github-username>`", value="Als Contributor anmelden und verifizieren", inline=False)
     embed.add_field(name="`!status [github-username]`", value="Contributor-Status pruefen", inline=False)
-    embed.add_field(name="`!help`", value="Diese Hilfe anzeigen", inline=False)
+    embed.add_field(name="`!nhelp`", value="Diese Hilfe anzeigen", inline=False)
     await ctx.send(embed=embed)
 
 
