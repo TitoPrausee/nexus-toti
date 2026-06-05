@@ -217,7 +217,7 @@ def create_app(config: dict = None) -> FastAPI:
 
 
 def get_chat_html() -> str:
-    """Inline HTML for Nexus chat UI — dark theme, modern design."""
+    """Inline HTML for Nexus chat UI — dark theme, SVG icons, typing animation."""
     return '''<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -286,9 +286,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 16px;
-  color: white;
+}
+
+.logo svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: white;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .header-title {
@@ -460,8 +467,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -520,23 +525,35 @@ body {
 .typing-indicator {
   display: none;
   padding: 4px 20px;
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
-.typing-indicator.active { display: block; }
+.typing-indicator.active { display: flex; align-items: center; gap: 10px; }
 
-.typing-dots span {
-  animation: blink 1.4s infinite;
-  animation-fill-mode: both;
+.typing-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 18px;
+  background: var(--nexus-bubble);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border-bottom-left-radius: 4px;
 }
 
-.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+.typing-bubble .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: bounce 1.4s infinite ease-in-out;
+}
 
-@keyframes blink {
-  0%, 80%, 100% { opacity: 0; }
-  40% { opacity: 1; }
+.typing-bubble .dot:nth-child(2) { animation-delay: 0.16s; }
+.typing-bubble .dot:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-8px); opacity: 1; }
 }
 
 /* Input */
@@ -572,12 +589,11 @@ body {
 .msg-input::placeholder { color: var(--text-muted); }
 
 .send-btn {
-  padding: 12px 16px;
+  padding: 12px;
   background: var(--accent);
   color: white;
   border: none;
   border-radius: var(--radius);
-  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -585,8 +601,25 @@ body {
   justify-content: center;
 }
 
+.send-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: white;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .send-btn:hover { background: var(--accent-hover); }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.send-btn.loading svg { animation: spin 1s linear infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 /* Responsive */
 @media (max-width: 600px) {
@@ -604,10 +637,19 @@ body {
 </style>
 </head>
 <body>
+<!-- SVG Icon Sprite -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg" id="icon-sprite">
+  <g id="i-nexus"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 7l10 5 10-5"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g>
+  <g id="i-send"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></g>
+  <g id="i-sparkle"><path d="M12 3l1.5 5L18 9l-4.5 1L12 15l-1.5-5L6 9l4.5-1z"/><path d="M4 18l2-2 2 2-2 2z"/><path d="M18 15l2-1 2 1-2 2z"/></g>
+  <g id="i-user"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
+  <g id="i-chevron-right"><polyline points="9 18 15 12 9 6"/></g>
+</svg>
+
 <div class="app">
   <div class="header">
     <div class="header-left">
-      <div class="logo">N</div>
+      <div class="logo"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
       <div>
         <div class="header-title">NEXUS v7</div>
         <div class="header-sub"><span class="status-dot"></span>Online</div>
@@ -630,21 +672,28 @@ body {
   </div>
 
   <div class="typing-indicator" id="typing">
-    NEXUS tippt<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+    <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#a29bfe);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-nexus"/></svg>
+    </div>
+    <div class="typing-bubble">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
   </div>
 
   <div class="input-area">
     <div class="input-wrapper">
       <textarea class="msg-input" id="input" placeholder="Nachricht an NEXUS..." rows="1"
                 onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="send-btn" id="send-btn" onclick="sendMessage()">&#9654;</button>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()"><svg viewBox="0 0 24 24"><use href="#i-send"/></svg></button>
     </div>
   </div>
 </div>
 
 <div class="name-overlay" id="name-overlay">
   <div class="name-card">
-    <div class="logo" style="width:56px;height:56px;font-size:24px;margin:0 auto 16px;">N</div>
+    <div class="logo" style="width:56px;height:56px;margin:0 auto 16px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
     <h2>Willkommen bei NEXUS</h2>
     <p>Open-Source KI-Agent mit Seele.<br>Wie moechtest du heissen?</p>
     <input type="text" class="name-input" id="name-input" placeholder="Dein Name..."
@@ -712,9 +761,12 @@ function addMessage(role, content) {
   const msg = document.createElement('div');
   msg.className = `msg ${role}`;
 
-  const initials = role === 'user' ? userName.charAt(0).toUpperCase() : 'N';
+  const avatarSvg = role === 'nexus'
+    ? '<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-nexus"/></svg>'
+    : '<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><use href="#i-user"/></svg>';
+
   msg.innerHTML = `
-    <div class="msg-avatar">${initials}</div>
+    <div class="msg-avatar">${avatarSvg}</div>
     <div>
       <div class="msg-bubble">${formatMessage(content)}</div>
       <div class="msg-time">${formatTime()}</div>
