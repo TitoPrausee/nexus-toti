@@ -78,14 +78,18 @@ class LLMClient:
         self.api_key = self.config.get("api_key") or os.environ.get("OLLAMA_API_KEY", "")
         self.mode = self.config.get("mode", "cloud")  # cloud, local, hybrid
 
-        # Load model configs
+        # Load model configs — supports both string shorthand and full dict
         self.models = dict(DEFAULT_MODELS)
         for key, mcfg in self.config.get("models", {}).items():
-            self.models[key] = ModelConfig(
-                name=mcfg.get("model", "kimi-k2.6:cloud"),
-                temperature=mcfg.get("temperature", 0.7),
-                max_tokens=mcfg.get("max_tokens", 4096),
-            )
+            if isinstance(mcfg, str):
+                # Shorthand: "coding: qwen3-coder-next:cloud"
+                self.models[key] = ModelConfig(name=mcfg)
+            elif isinstance(mcfg, dict):
+                self.models[key] = ModelConfig(
+                    name=mcfg.get("model", "kimi-k2.6:cloud"),
+                    temperature=mcfg.get("temperature", 0.7),
+                    max_tokens=mcfg.get("max_tokens", 4096),
+                )
 
         self.max_retries = self.config.get("max_retries", 2)
         self.timeout = self.config.get("timeout", 120)
