@@ -52,6 +52,22 @@ services:
     command: ["--contributor-bot"]
     restart: unless-stopped
 
+  nexus-web:
+    build: .
+    image: nexus-toti:v7
+    container_name: nexus-web
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - NEXUS_WEB_PORT=3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - nexus_data:/app/data
+      - nexus_soul:/app/nexus/soul
+    command: ["--web"]
+    restart: unless-stopped
+
 volumes:
   nexus_data:
   nexus_soul:

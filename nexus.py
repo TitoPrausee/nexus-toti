@@ -6,6 +6,7 @@ One agent. Soul-driven. Tool-empowered. Stream-fast.
 Usage:
     python nexus.py                    # CLI mode
     python nexus.py --telegram         # Telegram bot mode
+    python nexus.py --web              # Web UI mode (Tailscale)
     python nexus.py --contributor-bot  # Discord contributor bot mode
     python nexus.py --test             # Quick self-test
 """
@@ -54,6 +55,12 @@ def run_telegram(config: dict):
         asyncio.run(bot.start())
     except KeyboardInterrupt:
         bot.stop()
+
+
+def run_web(config: dict):
+    """Run Web UI server for Tailscale access."""
+    from nexus.interfaces.web_ui import main as web_main
+    web_main()
 
 
 def run_contributor_bot():
@@ -111,6 +118,7 @@ def run_test(config: dict):
 def main():
     parser = argparse.ArgumentParser(description="NEXUS v7 — Autonomous AI Agent")
     parser.add_argument("--telegram", action="store_true", help="Run as Telegram bot")
+    parser.add_argument("--web", action="store_true", help="Run Web UI server (Tailscale)")
     parser.add_argument("--contributor-bot", action="store_true", help="Run Discord contributor onboarding bot")
     parser.add_argument("--test", action="store_true", help="Run self-test")
     parser.add_argument("--config", default="config.yaml", help="Config file path")
@@ -124,6 +132,8 @@ def main():
         run_test(config)
     elif args.telegram:
         run_telegram(config)
+    elif args.web:
+        run_web(config)
     elif args.contributor_bot:
         run_contributor_bot()
     else:
