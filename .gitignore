@@ -1,12 +1,9 @@
 .env
+data/
 __pycache__/
 *.pyc
-*.pyo
-data/
-memory/sessions/
-memory/longterm/
-core/__pycache__/
-.DS_Store
+nexus_session.session
 *.egg-info/
 dist/
 build/
+.venv/
