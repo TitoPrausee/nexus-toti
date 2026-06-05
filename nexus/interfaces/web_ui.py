@@ -6,6 +6,7 @@ FastAPI + WebSocket chat for invited friends on Tailscale.
 import os
 import json
 import uuid
+import hashlib
 import logging
 from typing import Optional
 from pathlib import Path
@@ -23,6 +24,23 @@ log = logging.getLogger("nexus.web")
 # --- Config ---
 WEB_PORT = int(os.environ.get("NEXUS_WEB_PORT", "3000"))
 SESSION_TIMEOUT = 3600 * 2  # 2 hours idle session cleanup
+
+# Invite codes — {code: user_label} for per-user memory isolation
+_invite_env = os.environ.get("NEXUS_INVITE_CODES", "")
+if _invite_env:
+    INVITE_CODES: dict[str, str] = {c.strip(): c.strip() for c in _invite_env.split(",") if c.strip()}
+else:
+    INVITE_CODES: dict[str, str] = {
+        "nexus2024": "Alpha-Tester",
+        "toti-friend": "Freund",
+        "alpha-test": "Alpha-Tester",
+    }
+
+# Invite tokens -> invite code mapping (for per-user identity)
+_valid_tokens: dict[str, str] = {}  # {token: invite_code}
+
+# Per-user memory: {invite_code: [messages]}
+_user_memory: dict[str, list] = {}
 
 
 class WebSession:
@@ -101,10 +119,27 @@ def create_app(config: dict = None) -> FastAPI:
     async def health():
         return {"status": "ok", "sessions": len(sessions.sessions)}
 
+    @app.post("/api/invite")
+    async def verify_invite(request: Request):
+        """Verify an invite code and return a session token."""
+        body = await request.json()
+        code = body.get("code", "").strip()
+        if code in INVITE_CODES:
+            token = hashlib.sha256(f"{code}:{uuid.uuid4()}".encode()).hexdigest()[:24]
+            _valid_tokens[token] = code  # map token -> invite code
+            return {"valid": True, "token": token, "label": INVITE_CODES[code]}
+        return JSONResponse({"valid": False, "error": "Ungueltiger Code"}, status_code=403)
+
     @app.post("/api/chat")
     async def chat_api(request: Request):
         """REST API for chat — returns full response."""
         body = await request.json()
+        # Validate invite token
+        invite_token = body.get("invite_token", "")
+        if invite_token not in _valid_tokens:
+            raise HTTPException(403, "Ungueltiger Einladungscode. Bitte fordere einen Code beim Server-Admin an.")
+
+        invite_code = _valid_tokens[invite_token]
         message = body.get("message", "").strip()
         session_id = body.get("session_id")
         user_name = body.get("user_name", "Guest")
@@ -115,13 +150,27 @@ def create_app(config: dict = None) -> FastAPI:
         session = sessions.get_or_create(session_id, user_name)
         agent = session.init_agent(config)
 
+        # Ping for auth check — don't process or store
+        if message == "__ping__":
+            return {"response": "pong", "session_id": session.id, "user_name": session.user_name}
+
+        # Build context with per-user memory
+        user_history = _user_memory.setdefault(invite_code, [])
+        user_history.append({"role": "user", "content": message})
+
         try:
             response = agent.process(message, user_id=session.id)
-            
+
             # If response is empty/error, give a friendly fallback
             if not response or not isinstance(response, str):
                 response = "Ich konnte leider keine Verbindung zum Sprachmodell herstellen. Bitte versuche es spaeter nochmal."
-            
+
+            user_history.append({"role": "assistant", "content": response})
+
+            # Keep last 50 messages per user
+            if len(user_history) > 50:
+                _user_memory[invite_code] = user_history[-50:]
+
             session.history.append({"role": "user", "content": message, "ts": __import__("time").time()})
             session.history.append({"role": "assistant", "content": response, "ts": __import__("time").time()})
 
@@ -691,7 +740,19 @@ body {
   </div>
 </div>
 
-<div class="name-overlay" id="name-overlay">
+<div class="name-overlay" id="invite-overlay">
+  <div class="name-card">
+    <div class="logo" style="width:56px;height:56px;margin:0 auto 16px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
+    <h2>NEXUS Zugang</h2>
+    <p>Dieser KI-Agent ist privat.<br>Bitte gib deinen Einladungscode ein.</p>
+    <input type="text" class="name-input" id="invite-input" placeholder="Einladungscode..."
+           onkeydown="if(event.key==='Enter')document.getElementById('invite-btn').click()" autofocus>
+    <div id="invite-error" style="color:var(--error);font-size:13px;margin-top:8px;display:none;">Ungueltiger Code. Frag einen Admin auf Discord.</div>
+    <button class="name-btn" id="invite-btn" onclick="verifyInvite()">Freischalten</button>
+  </div>
+</div>
+
+<div class="name-overlay" id="name-overlay" style="display:none;">
   <div class="name-card">
     <div class="logo" style="width:56px;height:56px;margin:0 auto 16px;"><svg viewBox="0 0 24 24"><use href="#i-nexus"/></svg></div>
     <h2>Willkommen bei NEXUS</h2>
@@ -706,14 +767,54 @@ body {
 const API = window.location.origin;
 let sessionId = null;
 let userName = localStorage.getItem('nexus_user') || '';
+let inviteToken = localStorage.getItem('nexus_invite') || '';
 let ws = null;
 let useWS = true;
 
-// Restore session
-if (userName) {
-  sessionId = localStorage.getItem('nexus_session') || null;
-  document.getElementById('name-overlay').style.display = 'none';
-  document.getElementById('session-info').textContent = userName;
+// Check if already invited (token stored locally)
+if (inviteToken) {
+  document.getElementById('invite-overlay').style.display = 'none';
+  if (userName) {
+    sessionId = localStorage.getItem('nexus_session') || null;
+    document.getElementById('name-overlay').style.display = 'none';
+    document.getElementById('session-info').textContent = userName;
+  } else {
+    document.getElementById('name-overlay').style.display = 'flex';
+  }
+}
+
+async function verifyInvite() {
+  const input = document.getElementById('invite-input');
+  const code = input.value.trim();
+  if (!code) return;
+
+  const btn = document.getElementById('invite-btn');
+  btn.disabled = true;
+  btn.textContent = 'Pruefe...';
+
+  try {
+    const res = await fetch(API + '/api/invite', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code: code}),
+    });
+    const data = await res.json();
+    if (data.valid) {
+      inviteToken = data.token;
+      localStorage.setItem('nexus_invite', inviteToken);
+      document.getElementById('invite-overlay').style.display = 'none';
+      document.getElementById('name-overlay').style.display = 'flex';
+      document.getElementById('name-input').focus();
+    } else {
+      document.getElementById('invite-error').style.display = 'block';
+    }
+  } catch (e) {
+    document.getElementById('invite-error').style.display = 'block';
+    document.getElementById('invite-error').textContent = 'Verbindungsfehler: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Freischalten';
+  }
 }
 
 function setName() {
@@ -799,9 +900,18 @@ async function sendMessage() {
         message: text,
         session_id: sessionId,
         user_name: userName,
+        invite_token: inviteToken,
       }),
     });
     const data = await res.json();
+
+    if (res.status === 403) {
+      // Token expired — show invite gate again
+      localStorage.removeItem('nexus_invite');
+      inviteToken = '';
+      document.getElementById('invite-overlay').style.display = 'flex';
+      return;
+    }
 
     if (data.session_id) {
       sessionId = data.session_id;
