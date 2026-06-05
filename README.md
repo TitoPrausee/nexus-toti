@@ -14,6 +14,231 @@
 
 ---
 
+## Diagramme
+
+### System-Architektur
+
+```mermaid
+graph TB
+    subgraph Interfaces
+        TG[Telegram Bot]
+        CLI[CLI Interface]
+    end
+
+    subgraph NexusAgent
+        AG[Agent Core<br/>Think-Act Loop]
+        SOUL[SoulEngine<br/>Persönlichkeit · Beziehungen]
+        MEM[MemorySystem<br/>L1 · L2 · L3 · L4]
+        TOOLS[ToolRegistry<br/>11 Werkzeuge]
+        LLM[LLMClient<br/>Ollama Cloud]
+    end
+
+    subgraph LLM_Routing["LLM-Routing"]
+        K[kimi-k2.6:cloud<br/>Orchestrator]
+        Q[qwen3-coder:cloud<br/>Coding]
+        G[glm-5.1:cloud<br/>Research]
+        GM[gemma4:cloud<br/>Creative]
+        FL[gemini-3-flash:cloud<br/>Fast]
+    end
+
+    subgraph Tools
+        T1[terminal]
+        T2[file_read · file_write<br/>file_search]
+        T3[web_search · web_fetch]
+        T4[code_exec · calculator]
+        T5[time · memory<br/>delegation]
+    end
+
+    subgraph Persistence["Persistenz"]
+        SY[soul.yaml]
+        RJ[relations.json]
+        LJ[longterm.json]
+        SJ[session.json]
+    end
+
+    TG --> AG
+    CLI --> AG
+
+    AG --> SOUL
+    AG --> MEM
+    AG --> TOOLS
+    AG --> LLM
+
+    LLM --> K
+    LLM --> Q
+    LLM --> G
+    LLM --> GM
+    LLM --> FL
+
+    TOOLS --> T1
+    TOOLS --> T2
+    TOOLS --> T3
+    TOOLS --> T4
+    TOOLS --> T5
+
+    SOUL --> SY
+    SOUL --> RJ
+    MEM --> SJ
+    MEM --> LJ
+
+    style AG fill:#1a1a2e,stroke:#e94560,color:#fff
+    style SOUL fill:#16213e,stroke:#0f3460,color:#fff
+    style MEM fill:#16213e,stroke:#0f3460,color:#fff
+    style TOOLS fill:#16213e,stroke:#0f3460,color:#fff
+    style LLM fill:#16213e,stroke:#e94560,color:#fff
+```
+
+### Think-Act Loop
+
+```mermaid
+sequenceDiagram
+    participant U as Nutzer
+    participant I as Interface<br/>(Telegram/CLI)
+    participant A as NexusAgent
+    participant M as Memory
+    participant S as Soul
+    participant L as LLMClient
+    participant T as Tools
+
+    U->>I: Nachricht
+    I->>A: process(message, user_id)
+    A->>M: add(user, message)
+    A->>S: get_system_prompt() + get_user_context()
+    A->>M: get_context(max_tokens)
+    A->>L: chat(messages)
+
+    alt LLM gibt Tool-Call
+        L-->>A: Response mit <tool>...</tool>
+        A->>A: parse_tool_calls()
+        loop Für jeden Tool-Call
+            A->>T: execute(tool, **args)
+            T-->>A: ToolResult
+            A->>L: chat(messages + result)
+        end
+        L-->>A: Finale Text-Antwort
+    else LLM gibt direkte Antwort
+        L-->>A: Text-Antwort
+    end
+
+    A->>M: add(assistant, response)
+    A->>S: update_user(user_id, trust_delta=+0.01)
+    A-->>I: response
+    I-->>U: Nachricht
+```
+
+### Memory-Hierarchie
+
+```mermaid
+graph TD
+    subgraph L1["L1 — Working Memory"]
+        direction LR
+        L1A[Aktuelle Konversation] --> L1B[Auto-Trim<br/>bei Token-Limit]
+        L1B --> L1C[Komprimierung<br/>→ L2]
+    end
+
+    subgraph L2["L2 — Session Memory"]
+        direction LR
+        L2A[Session-Zusammenfassungen] --> L2B[48h TTL<br/>max 50 Einträge]
+        L2B --> L2C[Verfall<br/>→ gelöscht]
+    end
+
+    subgraph L3["L3 — Long-Term Memory"]
+        direction LR
+        L3A[Wichtige Fakten] --> L3B[Keyword-Recall<br/>max 200 Einträge]
+        L3B --> L3C[Importance-Decay<br/>niedrige = verfallen]
+    end
+
+    subgraph L4["L4 — Soul (PERMANENT)"]
+        direction LR
+        L4A[Persönlichkeit] --> L4B[Beziehungen]
+        L4B --> L4C[Kernwissen]
+    end
+
+    L1 -->|auto-compress| L2
+    L2 -->|important facts| L3
+    L3 -->|identity-level| L4
+
+    style L1 fill:#0f3460,stroke:#e94560,color:#fff
+    style L2 fill:#16213e,stroke:#533483,color:#fff
+    style L3 fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style L4 fill:#0a0a0a,stroke:#e94560,color:#e94560
+```
+
+### LLM-Fallback-Chain
+
+```mermaid
+flowchart TD
+    REQ[Anfrage] --> PRIM{Primary Model<br/>kimi-k2.6:cloud}
+
+    PRIM -->|Erfolg| RESP[Antwort an Agent]
+    PRIM -->|Fehler| CF1{Cloud Fallback<br/>glm-5.1:cloud}
+
+    CF1 -->|Erfolg| RESP
+    CF1 -->|Fehler| CF2{Local Fallback<br/>qwen2.5:3b}
+
+    CF2 -->|Erfolg| RESP
+    CF2 -->|Fehler| ERR[Graceful Error<br/>Nutzer benachrichtigen]
+
+    RESP --> AGENT[NexusAgent verarbeitet]
+
+    style PRIM fill:#1a1a2e,stroke:#e94560,color:#fff
+    style CF1 fill:#16213e,stroke:#533483,color:#fff
+    style CF2 fill:#0f3460,stroke:#0f3460,color:#fff
+    style ERR fill:#2a0a0a,stroke:#e94560,color:#e94560
+```
+
+### Soul-Komponenten
+
+```mermaid
+classDiagram
+    class SoulEngine {
+        +personality: dict
+        +knowledge: dict
+        +quirks: list
+        +relationships: dict
+        +get_system_prompt() str
+        +get_user_context(user_id) str
+        +update_user(user_id, name, language, trust_delta)
+        +learn(category, fact)
+        +save()
+        +_load()
+    }
+
+    class UserRelation {
+        +name: str
+        +language: str
+        +preferences: list
+        +conversation_count: int
+        +trust_level: float
+        +notes: list
+    }
+
+    class MemorySystem {
+        +l1: list
+        +l2: list
+        +l3: list
+        +add(role, content, importance)
+        +get_context(max_tokens) list
+        +remember(content, category, importance)
+        +recall(query, limit) list
+        +end_session()
+    }
+
+    class NexusAgent {
+        +llm: LLMClient
+        +memory: MemorySystem
+        +soul: SoulEngine
+        +tools: ToolRegistry
+        +process(message, user_id) str
+        +process_stream(message, user_id) AsyncIterator
+        +shutdown()
+    }
+
+    NexusAgent --> SoulEngine : uses
+    NexusAgent --> MemorySystem : uses
+    SoulEngine --> UserRelation : manages
+```
+
 ## Architektur
 
 ```
