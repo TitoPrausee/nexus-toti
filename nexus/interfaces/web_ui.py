@@ -26,8 +26,15 @@ log = logging.getLogger("nexus.web")
 # --- Config ---
 WEB_PORT = int(os.environ.get("NEXUS_WEB_PORT", "3000"))
 SESSION_TIMEOUT = 3600 * 2
-RATE_LIMIT_REQUESTS = 30   # max messages per user per window
-RATE_LIMIT_WINDOW = 3600   # 1 hour window
+RATE_LIMIT_REQUESTS = 30   # default max messages per user per window
+RATE_LIMIT_WINDOW = 3600   # default 1 hour window
+
+# Per-code rate limit overrides: {code: (max_requests, window_seconds)}
+# 0 max_requests = unlimited
+CODE_RATE_OVERRIDES: dict[str, tuple[int, int]] = {
+    "nexus-admin": (0, 0),           # unlimited
+    "nexus-test": (1, 600),          # 1 message per 10 minutes
+}
 
 # Invite codes — {code: user_label}
 _invite_env = os.environ.get("NEXUS_INVITE_CODES", "")
@@ -38,6 +45,7 @@ else:
         "nexus2024": "Alpha-Tester",
         "toti-friend": "Freund",
         "alpha-test": "Alpha-Tester",
+        "nexus-admin": "Admin",
     }
 
 # Runtime state
@@ -85,8 +93,12 @@ class SessionManager:
 sessions = SessionManager()
 
 
+ADMIN_CODES = {"nexus-admin"}
+
 def _check_rate_limit(invite_code: str) -> bool:
-    """Return True if within rate limit."""
+    """Return True if within rate limit. Admin codes have no limit."""
+    if invite_code in ADMIN_CODES:
+        return True
     now = time.time()
     timestamps = _rate_limits.setdefault(invite_code, [])
     # Remove old entries
@@ -135,7 +147,8 @@ def create_app(config: dict = None) -> FastAPI:
         if code in INVITE_CODES:
             token = hashlib.sha256(f"{code}:{uuid.uuid4()}".encode()).hexdigest()[:24]
             _valid_tokens[token] = code
-            return {"valid": True, "token": token, "label": INVITE_CODES[code], "daily_limit": RATE_LIMIT_REQUESTS}
+            limit = 0 if code in ADMIN_CODES else RATE_LIMIT_REQUESTS
+            return {"valid": True, "token": token, "label": INVITE_CODES[code], "daily_limit": limit}
         return JSONResponse({"valid": False, "error": "Ungueltiger Code"}, status_code=403)
 
     @app.post("/api/chat")
@@ -508,7 +521,7 @@ async function verifyInvite() {
     const data = await res.json();
     if (data.valid) {
       inviteToken = data.token;
-      rateLimit = data.daily_limit || 30;
+      rateLimit = data.daily_limit === 0 ? Infinity : (data.daily_limit || 30);
       localStorage.setItem('nexus_invite', inviteToken);
       document.getElementById('invite-overlay').style.display = 'none';
       document.getElementById('name-overlay').style.display = 'flex';
