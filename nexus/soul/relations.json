@@ -50,5 +50,18 @@
     "formality_level": -1.0,
     "technical_depth": -1.0,
     "verbosity_preference": -1.0
+  },
+  "8523588817": {
+    "name": "",
+    "language": "de",
+    "preferences": [],
+    "conversation_count": 2,
+    "last_seen": 1780931677.896172,
+    "trust_level": 0.53,
+    "notes": [],
+    "humor_style": "",
+    "formality_level": 0.5,
+    "technical_depth": 0.5,
+    "verbosity_preference": 0.38
   }
 }
