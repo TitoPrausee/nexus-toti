@@ -56,6 +56,14 @@ memory:
   auto_compress: true
   compress_threshold: 0.7  # compress when L1 is 70% full
 
+  # Vector search for L3 semantic recall (v7.2)
+  # Uses sentence-transformers for embedding-based similarity search
+  vector_search:
+    enabled: true
+    model_name: "paraphrase-multilingual-MiniLM-L12-v2"  # ~470MB, 50+ languages
+    similarity_threshold: 0.3  # minimum cosine similarity for results
+    max_results: 10  # max results from vector search before filtering
+
 # ─── TOOLS ──────────────────────────────────────────────
 tools:
   enabled:
@@ -86,6 +94,20 @@ telegram:
   parse_mode: "MarkdownV2"
   # Fast response — send partial results while still thinking
   min_stream_interval: 0.3  # seconds between stream chunks
+
+  # Per-user rate limiting (token bucket)
+  rate_limiter:
+    rate: 0.33              # messages per second (1 msg / 3s)
+    burst: 5                # max burst: 5 rapid messages before throttling
+    stale_after: 3600       # cleanup inactive user buckets after 1h
+    cleanup_interval: 300   # run cleanup every 5 minutes
+
+# ─── SESSION MANAGER ─────────────────────────────────────
+session_manager:
+  timeout_seconds: 3600       # Idle session timeout (1 hour)
+  max_sessions: 50            # Maximum concurrent sessions
+  cleanup_interval: 300       # Run cleanup every 5 minutes
+  auto_save_on_cleanup: true  # Save conversation on session timeout
 
 # ─── PERFORMANCE ─────────────────────────────────────────
 performance:

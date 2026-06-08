@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import logging
+from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass
 
@@ -103,7 +104,7 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(False, "", str(e))
 
-    def _tool_file_read(self, path: str, offset: int = 0, limit: int = 500) -> ToolResult:
+    def _tool_file_read(self, path: str, offset: int = 0, limit: int = 500, **kwargs) -> ToolResult:
         """Read a file's contents."""
         try:
             filepath = Path(path).expanduser()
@@ -123,7 +124,7 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(False, "", str(e))
 
-    def _tool_file_write(self, path: str, content: str) -> ToolResult:
+    def _tool_file_write(self, path: str, content: str, **kwargs) -> ToolResult:
         """Write content to a file."""
         try:
             filepath = Path(path).expanduser()
@@ -234,7 +235,7 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(False, "", str(e))
 
-    def _tool_calculator(self, expression: str) -> ToolResult:
+    def _tool_calculator(self, expression: str, **kwargs) -> ToolResult:
         """Evaluate a math expression safely."""
         try:
             # Only allow math operations
@@ -249,7 +250,7 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(False, "", f"Calculation error: {e}")
 
-    def _tool_time(self) -> ToolResult:
+    def _tool_time(self, **kwargs) -> ToolResult:
         """Get current date and time."""
         from datetime import datetime
         now = datetime.now()

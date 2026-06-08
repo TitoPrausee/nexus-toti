@@ -1,6 +1,8 @@
 # NEXUS v7 — Docker Compose
-# docker compose up nexus       → CLI mode
-# docker compose up nexus-telegram → Telegram bot mode
+# docker compose up nexus            → CLI mode
+# docker compose up nexus-telegram    → Telegram bot mode
+# docker compose up nexus-web         → Web UI mode
+# docker compose up nexus-contributor → Discord contributor bot
 
 services:
   nexus:
@@ -14,11 +16,32 @@ services:
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
       - NEXUS_TG_USERS=${NEXUS_TG_USERS:-}
+      - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
+      - NEXUS_LOG_FORMAT=${NEXUS_LOG_FORMAT:-text}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_data:/app/data
       - nexus_soul:/app/nexus/soul
+    healthcheck:
+      test: ["CMD", "python3", "nexus.py", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   nexus-telegram:
@@ -30,11 +53,32 @@ services:
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
       - NEXUS_TG_USERS=${NEXUS_TG_USERS:-}
+      - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
+      - NEXUS_LOG_FORMAT=${NEXUS_LOG_FORMAT:-text}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_data:/app/data
       - nexus_soul:/app/nexus/soul
+    healthcheck:
+      test: ["CMD", "python3", "nexus.py", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["--telegram"]
     restart: unless-stopped
 
@@ -45,10 +89,31 @@ services:
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
+      - NEXUS_LOG_FORMAT=${NEXUS_LOG_FORMAT:-text}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "nexus.py", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["--contributor-bot"]
     restart: unless-stopped
 
@@ -60,11 +125,32 @@ services:
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_WEB_PORT=3000
+      - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
+      - NEXUS_LOG_FORMAT=${NEXUS_LOG_FORMAT:-text}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - nexus_data:/app/data
       - nexus_soul:/app/nexus/soul
+    healthcheck:
+      test: ["CMD", "python3", "nexus.py", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["--web"]
     restart: unless-stopped
 
