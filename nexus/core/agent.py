@@ -159,7 +159,7 @@ class NexusAgent:
             return True
         return False
 
-    def _is_circular_chain(self, tool_name: str) -> tuple[bool, str]:
+    def _is_circular_chain(self, tool_name: str) -> "tuple[bool, str]":
         """Detect circular tool-call chains like A→B→A, A→B→C→A, A→B→A→B.
 
         Tracks sequences of tool names and detects when the same pattern
@@ -496,7 +496,7 @@ class NexusAgent:
 
         return calls
 
-    def _try_parse_json(self, text: str) -> dict | None:
+    def _try_parse_json(self, text: str) -> "dict | None":
         """Try to parse JSON, with fuzzy repair for common LLM mistakes."""
         # First attempt: clean parse
         try:
