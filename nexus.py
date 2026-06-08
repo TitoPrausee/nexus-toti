@@ -22,11 +22,16 @@ import logging
 import argparse
 import importlib
 from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
 
-__version__ = "7.0"
+__version__ = "8.0"
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Load .env from project root
+load_dotenv(Path(__file__).parent / ".env")
 
 from nexus.core.config import ConfigManager, apply_config_to_agent
 from nexus.core.config_validation import validate_config, print_validation_report
@@ -432,6 +437,7 @@ def main():
     if args.test:
         run_test(config)
     elif args.telegram:
+        from nexus.core.agent import NexusAgent
         agent = NexusAgent(config)
 
         # Register hot-reload callback for LLM config changes
