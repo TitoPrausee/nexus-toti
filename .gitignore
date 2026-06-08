@@ -7,3 +7,4 @@ nexus_session.session
 dist/
 build/
 .venv/
+.pytest_cache/

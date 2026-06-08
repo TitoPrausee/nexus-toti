@@ -15,6 +15,6 @@ discord.py>=2.3
 # Web search (optional — fallback uses requests)
 duckduckgo-search>=4.0
 
-# Future: vector search for better memory recall
-# sentence-transformers>=2.2
-# faiss-cpu>=1.7
+# Vector search for L3 memory (semantic similarity)
+sentence-transformers>=2.2
+numpy>=1.24
