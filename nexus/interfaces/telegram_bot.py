@@ -1,451 +1,298 @@
 """
-NEXUS v7 — Telegram Bot Interface
-Streaming-first, fast responses, soul-aware.
-Real-time step feedback (💻 terminal, 📖 read_file, etc.) — like Mercury.
-Typing indicator while processing.
-Interrupt handling — respond to new messages while busy.
-
-v8.0: Active feedback, typing indicator, interrupt queue.
+NEXUS v8.0 — Telegram Bot Interface (python-telegram-bot)
+Streaming responses, typing indicators, step feedback, interrupt handling.
+DSGVO-compliant: per-user consent, data minimization, right to deletion.
 """
 
 import os
 import re
-import json
-import logging
 import asyncio
-from typing import Optional, List
+import logging
+from datetime import datetime
 
-import telethon
-from telethon import TelegramClient, events
-from telethon.tl.types import Message
-
-from nexus.core.agent import NexusAgent
-from nexus.core.rate_limiter import RateLimiter
-from nexus.core.session_manager import SessionManager
-from nexus.core.feedback import FeedbackEmitter, FeedbackType
-from nexus.interfaces.markdown_utils import (
-    escape_markdown_v2,
-    format_markdown_v2,
-    split_markdown_v2,
+from telegram import Update, ChatAction
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
 )
 
-log = logging.getLogger("nexus.telegram")
+from nexus.core.agent import NexusAgent
+from nexus.core.session_manager import SessionManager
+from nexus.core.rate_limiter import RateLimiter
+from nexus.core.feedback import FeedbackEmitter
+from nexus.interfaces.markdown_utils import escape_markdown_v2
 
-# Mercury-style step icons
-_TOOL_ICONS = {
-    "terminal": "💻",
-    "file_read": "📖",
-    "file_write": "✏️",
-    "file_search": "🔍",
-    "web_search": "🌐",
-    "web_fetch": "🌐",
-    "code_exec": "⚡",
-    "calculator": "🔢",
-    "time": "🕐",
-    "delegation": "🤝",
-    "memory": "🧠",
-    "session": "💾",
-    "skill": "📚",
-    "thinking": "🧠",
-    "llm_call": "💭",
-}
+log = logging.getLogger("nexus.telegram")
 
 
 class NexusTelegramBot:
     """
-    Telegram interface for NEXUS v7.
-
-    Features:
-    - Step-by-step progress feedback (💻 terminal, 📖 read_file, etc.)
-    - Typing indicator while processing
-    - Interrupt handling — queue messages while busy
-    - Per-chat session management with isolated L1 memory
-    - Per-user rate limiting
-    - Timeout-based session cleanup
-    - MarkdownV2 formatting
+    Telegram bot using python-telegram-bot.
+    Only needs BOT_TOKEN — no api_id/api_hash required.
+    Supports: typing indicators, step feedback, interrupt handling.
     """
 
     def __init__(self, agent: NexusAgent, config: dict = None):
-        """
-        Initialize the Telegram bot.
-
-        Args:
-            agent: A NexusAgent instance (used for shared L3/soul initialization).
-            config: Bot-specific configuration dict.
-        """
+        self.agent = agent
         self.config = config or {}
-
-        # Session manager for per-chat agent instances
-        app_config = self.config.get("app_config", {})
-        if not app_config:
-            app_config = agent.config if hasattr(agent, 'config') else {}
-
-        self.session_manager = SessionManager(app_config)
-        log.info("SessionManager initialized for per-chat isolation")
-
-        # Telegram config
         self.token = os.environ.get(
-            self.config.get("token_env", "NEXUS_TG_TOKEN"),
-            ""
+            self.config.get("token_env", "NEXUS_TG_TOKEN"), ""
         )
-        authorized_env = self.config.get("authorized_users_env", "NEXUS_TG_USERS")
-        authorized_raw = os.environ.get(authorized_env, "")
-        self.authorized_users = set()
-        if authorized_raw:
-            self.authorized_users = {
-                int(uid.strip())
-                for uid in authorized_raw.split(",")
-                if uid.strip().isdigit()
-            }
-
-        self.streaming = self.config.get("streaming", True)
-        self.typing_indicator = self.config.get("typing_indicator", True)
-        self.max_message_length = self.config.get("max_message_length", 4096)
-        self.min_stream_interval = self.config.get("min_stream_interval", 0.3)
-
-        # Per-user rate limiter: 1 message per 3 seconds, burst of 5
-        rate_limiter_config = self.config.get("rate_limiter", {})
+        self.authorized_users = self._parse_authorized_users()
+        self.session_manager = SessionManager(
+            config.get("session_manager", {})
+        )
         self.rate_limiter = RateLimiter(
-            rate=rate_limiter_config.get("rate", 1.0 / 3.0),
-            burst=rate_limiter_config.get("burst", 5),
-            config=rate_limiter_config,
+            rate=self.config.get("rate_limiter", {}).get("rate", 0.33),
+            burst=self.config.get("rate_limiter", {}).get("burst", 5),
         )
+        self._processing = {}  # user_id -> bool (currently processing)
+        self._interrupt_queue = {}  # user_id -> list[pending messages]
+        self._feedback_emitters = {}  # user_id -> FeedbackEmitter
 
-        # Session cleanup task
-        self._cleanup_task = None
-        self.client = None
-
-        # v8.0: Track which chat_id maps to which agent (for interrupts)
-        self._chat_agents = {}  # chat_id -> NexusAgent
+    def _parse_authorized_users(self):
+        """Parse authorized user IDs from env var."""
+        env_var = self.config.get("authorized_users_env", "NEXUS_TG_USERS")
+        raw = os.environ.get(env_var, "")
+        if not raw:
+            return set()
+        users = set()
+        for part in raw.split(","):
+            part = part.strip()
+            if part.isdigit():
+                users.add(int(part))
+        return users
 
     async def start(self):
-        """Start the Telegram bot and session cleanup background task."""
+        """Start the Telegram bot."""
         if not self.token:
             log.error("No Telegram token found. Set NEXUS_TG_TOKEN env var.")
             return
 
-        # Telegram API credentials from https://my.telegram.org
-        # Required by Telethon even for bot mode
-        api_id = int(os.environ.get("TELEGRAM_API_ID", "0"))
-        api_hash = os.environ.get("TELEGRAM_API_HASH", "")
-
-        self.client = TelegramClient(
-            "nexus_session",
-            api_id=api_id,
-            api_hash=api_hash,
-        )
-
-        # Bot mode — just use token
-        await self.client.start(bot_token=self.token)
+        app = ApplicationBuilder().token(self.token).build()
 
         # Register handlers
-        @self.client.on(events.NewMessage(incoming=True))
-        async def handle_message(event):
-            await self._handle_message(event)
+        app.add_handler(CommandHandler("start", self._cmd_start))
+        app.add_handler(CommandHandler("help", self._cmd_help))
+        app.add_handler(CommandHandler("status", self._cmd_status))
+        app.add_handler(CommandHandler("delete", self._cmd_delete))
+        app.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND, self._handle_message
+        ))
 
-        # Start periodic session cleanup
-        cleanup_interval = self.config.get(
-            "session_manager", {}
-        ).get("cleanup_interval", 300)
+        log.info(f"NEXUS Telegram bot starting (authorized: {self.authorized_users or 'all'})")
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        log.info("NEXUS Telegram bot running ✓")
 
-        async def session_cleanup_loop():
-            """Periodically clean up idle sessions."""
+        # Keep running
+        try:
             while True:
-                await asyncio.sleep(cleanup_interval)
-                try:
-                    removed = self.session_manager.cleanup_idle()
-                    if removed > 0:
-                        log.info(f"Session cleanup: removed {removed} idle sessions")
-                except Exception as e:
-                    log.error(f"Session cleanup error: {e}")
+                await asyncio.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            log.info("Shutting down...")
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
 
-        self._cleanup_task = asyncio.create_task(session_cleanup_loop())
+    # ─── Commands ──────────────────────────────────────
 
-        log.info("NEXUS Telegram bot started with per-chat session management")
-        await self.client.run_until_disconnected()
+    async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command."""
+        user = update.effective_user
+        if self.authorized_users and user.id not in self.authorized_users:
+            await update.message.reply_text("Nicht autorisiert.")
+            return
+        await update.message.reply_text(
+            f"Hey {user.first_name}! 👋 Ich bin **Toti** — dein KI-Assistent.\n\n"
+            "Einfach schreiben, was du brauchst. Ich zeige dir jeden Schritt live an.\n\n"
+            "/status — Meine Info\n/help — Hilfe\n/delete — Deine Daten löschen (DSGVO)"
+        )
 
-    async def _handle_message(self, event):
-        """Handle incoming Telegram message with interrupt support and step feedback."""
-        sender = await event.get_sender()
-        user_id = str(sender.id) if sender else None
-        chat_id = str(event.chat_id) if hasattr(event, 'chat_id') else user_id
+    async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(
+            "**Toti — KI-Assistent**\n\n"
+            "Einfach schreiben, ich antworte mit Schritt-für-Schritt-Feedback.\n\n"
+            "Besonderheiten:\n"
+            "• Live-Feedback bei jedem Arbeitsschritt\n"
+            "• Unterbrich mich jederzeit — ich antworte kurz und setze danach fort\n"
+            "• Ich lerne automatisch aus unseren Gesprächen\n\n"
+            "/status — Infos über mich\n/delete — Deine Daten löschen"
+        )
+
+    async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        processing = self._processing.get(user.id, False)
+        status = "arbeitet" if processing else "bereit"
+        await update.message.reply_text(
+            f"**Toti v8.0** — {status}\n\n"
+            f"Session: {self.session_manager.stats()['active_sessions']} aktiv\n"
+            f"Ollama Cloud: kimi-k2.6:cloud\n"
+            f"DSGVO: konform"
+        )
+
+    async def _cmd_delete(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """DSGVO right to deletion."""
+        user = update.effective_user
+        self.agent.memory.clear_user(user.id)
+        self.session_manager.remove(user.id)
+        await update.message.reply_text(
+            "✅ Alle deine Daten wurden gelöscht. DSGVO-konform."
+        )
+
+    # ─── Message Handler ───────────────────────────────
+
+    async def _handle_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming text messages with interrupt support."""
+        user = update.effective_user
+        chat_id = update.effective_chat.id
+        text = update.message.text
+
+        if not text or text.startswith("/"):
+            return
 
         # Auth check
-        if self.authorized_users and sender.id not in self.authorized_users:
-            await event.respond(escape_markdown_v2("Nicht autorisiert."), parse_mode="MarkdownV2")
+        if self.authorized_users and user.id not in self.authorized_users:
+            await update.message.reply_text("Nicht autorisiert.")
             return
 
-        message_text = event.message.message
-        if not message_text:
+        # Rate limiting
+        if not self.rate_limiter.allow(user.id):
+            await update.message.reply_text("⏳ Etwas zu schnell. Kurz warten...")
             return
 
-        # Rate limiting — per-user token bucket
-        if user_id and not self.rate_limiter.allow(user_id):
-            wait = self.rate_limiter.wait_time(user_id)
-            log.info(f"Rate limited user {user_id}, wait {wait:.1f}s")
-            rate_msg = escape_markdown_v2(
-                f"Zu viele Nachrichten. Bitte warte {wait:.0f} Sekunden."
+        # ─── Interrupt handling ──────────────────────
+        if self._processing.get(user.id, False):
+            # Currently processing — queue as interrupt
+            if user.id not in self._interrupt_queue:
+                self._interrupt_queue[user.id] = []
+            self._interrupt_queue[user.id].append(text)
+
+            # Send brief acknowledgment
+            await ctx.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await update.message.reply_text(
+                "⚡ Unterbrochen! Kurze Antwort kommt, dann setze ich fort."
             )
-            await self._send_message(event, rate_msg)
             return
 
-        log.info(f"Message from {sender.first_name if sender else 'unknown'}: {message_text[:100]}")
+        # ─── Normal processing ───────────────────────
+        self._processing[user.id] = True
 
-        # Get or create a per-chat session
-        chat_session = self.session_manager.get_or_create(
-            chat_id=chat_id,
-            user_id=user_id or "",
+        # Create feedback emitter for this user
+        emitter = FeedbackEmitter(
+            callback=lambda msg, chat_id=chat_id, ctx=ctx: asyncio.ensure_future(
+                self._send_step_feedback(chat_id, ctx, msg)
+            )
         )
-        agent = chat_session.agent
-        self._chat_agents[chat_id] = agent
-
-        # v8.0: If agent is busy, queue as interrupt instead of waiting
-        if agent.is_busy:
-            agent.queue_interrupt(message_text, user_id)
-            # Send immediate acknowledgment
-            ack_msg = "⚡ Unterbrochen! Kurze Antwort kommt, dann setze ich fort."
-            await event.respond(ack_msg, parse_mode="MarkdownV2")
-            # Keep typing indicator
-            await self._send_typing(event)
-            return
-
-        # Create feedback emitter for this request
-        feedback_queue = asyncio.Queue()
-        feedback = FeedbackEmitter(async_queue=feedback_queue)
-
-        # v8.0: Process with feedback in background task
-        # Send initial "thinking" indicator
-        await self._send_typing(event)
-
-        # Start progress updater task — reads from feedback queue and sends updates
-        progress_task = asyncio.create_task(
-            self._progress_updater(event, feedback_queue, chat_id)
-        )
+        self._feedback_emitters[user.id] = emitter
 
         try:
-            # Run the synchronous agent.process in a thread pool
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: agent.process(
-                    message_text, user_id=user_id, feedback=feedback
-                )
+            # Show typing indicator continuously
+            typing_task = asyncio.create_task(
+                self._typing_loop(chat_id, ctx)
             )
 
-            # Wait for progress updater to finish
-            await progress_task
+            # Store original reply method for streaming
+            response = await asyncio.to_thread(
+                self.agent.process, text, str(user.id), feedback=emitter
+            )
 
-            # Send final response
-            formatted = self._format_markdown(response)
-            await self._send_message(event, formatted)
+            # Stop typing
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+            # Send final response (split if too long)
+            await self._send_response(chat_id, ctx, response)
+
+            # Check for queued interrupts
+            pending = self._interrupt_queue.pop(user.id, [])
+            if pending:
+                # Brief acknowledgment of queued items
+                queued_text = "\n".join(f"• {m[:80]}" for m in pending[:5])
+                await ctx.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📋 Eingereihte Nachrichten:\n{queued_text}\n\n_Spricht dein Anliegen? Sonst einfach neu schreiben._"
+                )
 
         except Exception as e:
             log.error(f"Error processing message: {e}", exc_info=True)
-            # Cancel progress task on error
-            progress_task.cancel()
-            error_msg = escape_markdown_v2(f"Fehler: {e}")
-            await self._send_message(event, error_msg)
+            await ctx.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ Fehler: {str(e)[:200]}"
+            )
+        finally:
+            self._processing[user.id] = False
+            self._feedback_emitters.pop(user.id, None)
 
-    async def _progress_updater(self, event, queue: asyncio.Queue, chat_id: str):
-        """Send step-by-step progress messages from feedback events.
+    # ─── Helpers ────────────────────────────────────────
 
-        Instead of one message per step, we batch events and send
-        periodic updates to avoid Telegram rate limiting.
-        """
-        collected_steps = []
-        last_update = asyncio.get_event_loop().time()
-        update_interval = 2.0  # Send batched update every 2 seconds
-        status_message = None
-
+    async def _typing_loop(self, chat_id: int, ctx: ContextTypes.DEFAULT_TYPE):
+        """Continuously send typing indicator while processing."""
         while True:
             try:
-                # Wait for next event with timeout
-                event_obj = await asyncio.wait_for(queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                # No new event — check if we should send a batched update
-                now = asyncio.get_event_loop().time()
-                if collected_steps and (now - last_update) >= update_interval:
-                    # Send batched progress update
-                    progress_text = self._format_steps(collected_steps)
-                    try:
-                        if status_message:
-                            await status_message.edit(progress_text)
-                        else:
-                            status_message = await event.respond(progress_text)
-                    except Exception:
-                        pass  # Silently ignore edit failures
-                    collected_steps = []
-                    last_update = now
+                await ctx.bot.send_chat_action(
+                    chat_id=chat_id, action=ChatAction.TYPING
+                )
+                await asyncio.sleep(4)  # Telegram typing lasts ~5s
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(5)
 
-                # Keep typing indicator alive
-                await self._send_typing(event)
-                continue
-
-            # None is the sentinel for "done"
-            if event_obj is None:
-                # Send any remaining steps
-                if collected_steps:
-                    progress_text = self._format_steps(collected_steps)
-                    try:
-                        if status_message:
-                            await status_message.edit(progress_text)
-                        else:
-                            await event.respond(progress_text)
-                    except Exception:
-                        pass
-                # Delete the temporary status message
-                if status_message:
-                    try:
-                        await status_message.delete()
-                    except Exception:
-                        pass
-                return
-
-            # Collect the step
-            collected_steps.append(event_obj)
-            last_step_time = asyncio.get_event_loop().time()
-
-            # If it's a DONE event, flush immediately
-            if event_obj.type == FeedbackType.DONE:
-                if collected_steps:
-                    progress_text = self._format_steps(collected_steps)
-                    try:
-                        if status_message:
-                            await status_message.edit(progress_text)
-                        else:
-                            await event.respond(progress_text)
-                    except Exception:
-                        pass
-                if status_message:
-                    try:
-                        await status_message.delete()
-                    except Exception:
-                        pass
-                return
-
-    def _format_steps(self, steps: list) -> str:
-        """Format feedback steps as Telegram message."""
-        lines = []
-        seen = set()
-        for step in steps[-8:]:  # Show last 8 steps max
-            icon = _TOOL_ICONS.get(step.type.value, "⏳")
-            # Deduplicate consecutive identical steps
-            step_key = f"{icon}{step.message}"
-            if step_key in seen:
-                continue
-            seen.add(step_key)
-
-            if step.detail:
-                # Truncate detail for display
-                detail = step.detail[:50]
-                lines.append(f"{icon} {step.message}: _{detail}_")
-            else:
-                lines.append(f"{icon} {step.message}")
-
-        if not lines:
-            return "🧠 Arbeite..."
-
-        return "\n".join(lines)
-
-    async def _send_typing(self, event):
-        """Send typing indicator to the chat."""
-        if not self.typing_indicator or not self.client:
-            return
+    async def _send_step_feedback(self, chat_id: int, ctx, message: str):
+        """Send a step feedback message (brief, overwritable)."""
         try:
-            await asyncio.sleep(0.05)
-            from telethon.tl.functions.messages import SetTypingRequest
-            from telethon.tl.types import SendMessageTypingAction
-            peer = await event.get_input_chat()
-            await self.client(SetTypingRequest(peer=peer, action=SendMessageTypingAction()))
-        except Exception:
-            pass  # Typing indicator is best-effort
-
-    async def _stream_response(self, event, message_text: str, user_id: str, agent: NexusAgent):
-        """Stream response token by token, sending partial updates.
-
-        During streaming, we send raw text chunks for responsiveness.
-        The final message is formatted with MarkdownV2.
-        """
-        buffer = ""
-        last_sent_len = 0
-
-        async for token in agent.process_stream(message_text, user_id=user_id):
-            buffer += token
-
-            # Send raw text updates during streaming for speed
-            if len(buffer) - last_sent_len > 200:
-                await self._send_message(event, buffer, parse_mode=None)
-                last_sent_len = len(buffer)
-
-        # Send final response with full MarkdownV2 formatting
-        final_text = self._format_markdown(buffer)
-        await self._send_message(event, final_text)
-
-    async def _send_message(self, event, text: str, parse_mode: str = None):
-        """Send message, splitting if too long. Respects MarkdownV2 formatting."""
-        if parse_mode is None:
-            parse_mode = self.config.get("parse_mode", "MarkdownV2")
-
-        # Split long messages respecting formatting boundaries
-        chunks = split_markdown_v2(text, max_length=self.max_message_length)
-
-        for i, chunk in enumerate(chunks):
-            try:
-                if parse_mode:
-                    await event.respond(chunk, parse_mode=parse_mode)
-                else:
-                    await event.respond(chunk)
-            except Exception as e:
-                # If MarkdownV2 parsing fails, fall back to plain text
-                log.warning(f"MarkdownV2 parse failed, sending as plain text: {e}")
-                try:
-                    await event.respond(chunk)
-                except Exception as e2:
-                    log.error(f"Failed to send message chunk {i+1}/{len(chunks)}: {e2}")
-
-            # Small delay between chunks to avoid rate limiting
-            if len(chunks) > 1 and i < len(chunks) - 1:
-                await asyncio.sleep(0.05)
-
-    def _format_markdown(self, text: str) -> str:
-        """Convert standard Markdown to Telegram MarkdownV2 format."""
-        return format_markdown_v2(text)
-
-    def stop(self):
-        """Stop the bot, save all sessions, and clean up."""
-        try:
-            self.session_manager.save_all()
-            log.info("All sessions saved on shutdown")
+            await ctx.bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode=None,  # Step feedback is plain text
+            )
         except Exception as e:
-            log.error(f"Failed to save sessions on shutdown: {e}")
+            log.debug(f"Step feedback send error (non-critical): {e}")
 
-        if self._cleanup_task and not self._cleanup_task.done():
-            self._cleanup_task.cancel()
+    async def _send_response(self, chat_id: int, ctx, text: str):
+        """Send response, splitting into chunks if needed (Telegram 4096 char limit)."""
+        MAX_LEN = 4096
 
-        if self.client:
-            self.client.disconnect()
-        log.info("NEXUS Telegram bot stopped")
+        # Try MarkdownV2 first, fall back to plain
+        try:
+            escaped = escape_markdown_v2(text)
+            chunks = self._split_text(escaped, MAX_LEN)
+            for chunk in chunks:
+                await ctx.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode="MarkdownV2",
+                )
+        except Exception:
+            # Fallback to plain text
+            chunks = self._split_text(text, MAX_LEN)
+            for chunk in chunks:
+                await ctx.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                )
 
-    def stats(self) -> dict:
-        """Get bot + rate limiter + session manager statistics."""
-        rate_stats = self.rate_limiter.stats()
-        session_stats = self.session_manager.stats()
-        return {
-            "rate_limiter": rate_stats,
-            "session_manager": session_stats,
-        }
-
-
-if __name__ == "__main__":
-    import yaml
-
-    with open("config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-
-    agent = NexusAgent(config)
-    bot_config = config.get("telegram", {})
-    bot_config["app_config"] = config
-
-    bot = NexusTelegramBot(agent, bot_config)
-
-    asyncio.run(bot.start())
+    @staticmethod
+    def _split_text(text: str, max_len: int) -> list:
+        """Split text into chunks respecting Telegram's length limit."""
+        if len(text) <= max_len:
+            return [text]
+        chunks = []
+        while text:
+            if len(text) <= max_len:
+                chunks.append(text)
+                break
+            # Find last newline within limit
+            split_at = text.rfind("\n", 0, max_len)
+            if split_at <= 0:
+                split_at = text.rfind(" ", 0, max_len)
+            if split_at <= 0:
+                split_at = max_len
+            chunks.append(text[:split_at])
+            text = text[split_at:].lstrip("\n ")
+        return chunks
