@@ -124,10 +124,15 @@ class NexusTelegramBot:
             log.error("No Telegram token found. Set NEXUS_TG_TOKEN env var.")
             return
 
+        # Telegram API credentials from https://my.telegram.org
+        # Required by Telethon even for bot mode
+        api_id = int(os.environ.get("TELEGRAM_API_ID", "0"))
+        api_hash = os.environ.get("TELEGRAM_API_HASH", "")
+
         self.client = TelegramClient(
             "nexus_session",
-            api_id=0,  # Will use bot token directly
-            api_hash="",
+            api_id=api_id,
+            api_hash=api_hash,
         )
 
         # Bot mode — just use token
