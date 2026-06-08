@@ -32,7 +32,7 @@ class NexusTelegramBot:
     """
     Telegram bot using python-telegram-bot.
     Only needs BOT_TOKEN — no api_id/api_hash required.
-    
+
     v8.1: Pair architecture for efficient routing.
     v8.0: Typing indicators, step feedback, interrupt handling.
     """
@@ -74,17 +74,17 @@ class NexusTelegramBot:
 
         # Flush stale polling connections
         import requests as sync_requests
-        base = f"https://api.telegram.org/bot{self.token}"
+        base = "https://api.telegram.org/bot" + self.token
         try:
-            sync_requests.post(f"{base}/setWebhook", json={"url": "https://example.com/fake"}, timeout=5)
-            sync_requests.get(f"{base}/deleteWebhook?drop_pending_updates=true", timeout=5)
-            import time; time.sleep(5)  # Wait for Telegram to release the lock
+            sync_requests.post(base + "/setWebhook", json={"url": "https://example.com/fake"}, timeout=5)
+            sync_requests.get(base + "/deleteWebhook?drop_pending_updates=true", timeout=5)
+            import time; time.sleep(5)
             log.info("Flushed stale polling connections")
         except Exception as e:
             log.warning(f"Webhook flush failed (non-critical): {e}")
 
         app = ApplicationBuilder().token(self.token).build()
-        app.updater._read_timeout = 30  # shorter timeout to avoid stale connections
+        app.updater._read_timeout = 30
 
         app.add_handler(CommandHandler("start", self._cmd_start))
         app.add_handler(CommandHandler("help", self._cmd_help))
@@ -116,67 +116,59 @@ class NexusTelegramBot:
         if self.authorized_users and user.id not in self.authorized_users:
             await update.message.reply_text("Nicht autorisiert.")
             return
-        
+
         # Personalization: first-contact greeting
         greeting = self.agent.personalization.generate_greeting(str(user.id))
         await update.message.reply_text(greeting)
 
     async def _cmd_help(self, update, ctx):
-        await update.message.reply_text(
-            "**Nexus — KI-Agent mit Pair-Architektur**
-
-"
-            "Einfach schreiben, ich antworte mit Schritt-fuer-Schritt-Feedback.
-
-"
-            "Besonderheiten:
-"
-            "- Pair-Architektur: schnelle Router-Antworten, tiefe Worker-Analyse
-"
-            "- Live-Feedback bei jedem Arbeitsschritt
-"
-            "- Ich lerne dich kennen und passe meinen Stil an
-"
-            "- Unterbrich mich jederzeit
-
-"
-            "/status — Infos ueber mich
-"
-            "/delete — Deine Daten loeschen (DSGVO)"
-        )
+        help_lines = [
+            "**Nexus — KI-Agent mit Pair-Architektur**",
+            "",
+            "Einfach schreiben, ich antworte mit Schritt-fuer-Schritt-Feedback.",
+            "",
+            "Besonderheiten:",
+            "- Pair-Architektur: schnelle Router-Antworten, tiefe Worker-Analyse",
+            "- Live-Feedback bei jedem Arbeitsschritt",
+            "- Ich lerne dich kennen und passe meinen Stil an",
+            "- Unterbrich mich jederzeit",
+            "",
+            "/status — Infos ueber mich",
+            "/delete — Deine Daten loeschen (DSGVO)",
+        ]
+        await update.message.reply_text(chr(10).join(help_lines))
 
     async def _cmd_status(self, update, ctx):
         user = update.effective_user
         processing = self._processing.get(user.id, False)
         status = "arbeitet" if processing else "bereit"
-        
-        # Get routing stats if available
-        budget_info = ""
-        if self.agent._iteration_budget:
-            budget_info = f"
-Budget: {self.agent._iteration_budget.summary()}"
-        
-        await update.message.reply_text(
-            f"**Nexus v8.1** — {status}
 
-"
-            f"Pair-Architektur: Router (fast) + Worker (capable)
-"
-            f"Session: {self.session_manager.stats()['active_sessions']} aktiv
-"
-            f"DSGVO: konform{budget_info}"
-        )
+        status_lines = [
+            "**Nexus v8.1** — " + status,
+            "",
+            "Pair-Architektur: Router (fast) + Worker (capable)",
+            "Session: " + str(self.session_manager.stats()["active_sessions"]) + " aktiv",
+            "DSGVO: konform",
+        ]
+
+        if self.agent._iteration_budget:
+            status_lines.append(
+                "Budget: " + self.agent._iteration_budget.summary()
+            )
+
+        await update.message.reply_text(chr(10).join(status_lines))
 
     async def _cmd_delete(self, update, ctx):
         user = update.effective_user
         self.agent.memory.clear_user(user.id)
         self.session_manager.remove(user.id)
         # Also clear personalization state
-        if str(user.id) in self.agent.personalization._onboardings:
-            del self.agent.personalization._onboardings[str(user.id)]
+        uid = str(user.id)
+        if uid in self.agent.personalization._onboardings:
+            del self.agent.personalization._onboardings[uid]
         # Clear soul relationship
-        if str(user.id) in self.agent.soul.relationships:
-            del self.agent.soul.relationships[str(user.id)]
+        if uid in self.agent.soul.relationships:
+            del self.agent.soul.relationships[uid]
             self.agent.soul.save()
         await update.message.reply_text("Alle deine Daten wurden geloescht. DSGVO-konform.")
 
@@ -206,7 +198,9 @@ Budget: {self.agent._iteration_budget.summary()}"
                 self._interrupt_queue[user.id] = []
             self._interrupt_queue[user.id].append(text)
             await ctx.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            await update.message.reply_text("Unterbrochen! Kurze Antwort kommt, dann setze ich fort.")
+            await update.message.reply_text(
+                "Unterbrochen! Kurze Antwort kommt, dann setze ich fort."
+            )
             return
 
         # ─── Normal processing ───────────────────────
@@ -241,17 +235,20 @@ Budget: {self.agent._iteration_budget.summary()}"
             # Check for queued interrupts
             pending = self._interrupt_queue.pop(user.id, [])
             if pending:
-                queued_text = "\n".join(f"  {m[:80]}" for m in pending[:5])
+                queued_text = chr(10).join(
+                    "  " + m[:80] for m in pending[:5]
+                )
                 await ctx.bot.send_message(
                     chat_id=chat_id,
-                    text=f"Eingereihte Nachrichten:\n{queued_text}\n\n_Spricht dein Anliegen? Sonst einfach neu schreiben._"
+                    text="Eingereihte Nachrichten:\n" + queued_text +
+                         "\n\n_Spricht dein Anliegen? Sonst einfach neu schreiben._"
                 )
 
         except Exception as e:
             log.error(f"Error processing message: {e}", exc_info=True)
             await ctx.bot.send_message(
                 chat_id=chat_id,
-                text=f"Fehler: {str(e)[:200]}"
+                text="Fehler: " + str(e)[:200]
             )
         finally:
             self._processing[user.id] = False
