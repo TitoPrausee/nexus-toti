@@ -76,12 +76,13 @@ class NexusTelegramBot:
         try:
             sync_requests.post(f"{base}/setWebhook", json={"url": "https://example.com/fake"}, timeout=5)
             sync_requests.get(f"{base}/deleteWebhook?drop_pending_updates=true", timeout=5)
-            import time; time.sleep(2)
+            import time; time.sleep(5)  # Wait for Telegram to release the lock
             log.info("Flushed stale polling connections")
         except Exception as e:
             log.warning(f"Webhook flush failed (non-critical): {e}")
 
         app = ApplicationBuilder().token(self.token).build()
+        app.updater._read_timeout = 30  # shorter timeout to avoid stale connections
 
         # Register handlers
         app.add_handler(CommandHandler("start", self._cmd_start))
