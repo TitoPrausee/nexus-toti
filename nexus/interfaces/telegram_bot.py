@@ -70,6 +70,17 @@ class NexusTelegramBot:
             log.error("No Telegram token found. Set NEXUS_TG_TOKEN env var.")
             return
 
+        # Flush any lingering getUpdates connections by setting then deleting a webhook
+        import requests as sync_requests
+        base = f"https://api.telegram.org/bot{self.token}"
+        try:
+            sync_requests.post(f"{base}/setWebhook", json={"url": "https://example.com/fake"}, timeout=5)
+            sync_requests.get(f"{base}/deleteWebhook?drop_pending_updates=true", timeout=5)
+            import time; time.sleep(2)
+            log.info("Flushed stale polling connections")
+        except Exception as e:
+            log.warning(f"Webhook flush failed (non-critical): {e}")
+
         app = ApplicationBuilder().token(self.token).build()
 
         # Register handlers
