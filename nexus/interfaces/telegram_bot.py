@@ -123,15 +123,9 @@ class NexusTelegramBot:
 
     async def _cmd_help(self, update, ctx):
         help_lines = [
-            "**Nexus — KI-Agent mit Pair-Architektur**",
+            "**Nexus** — KI-Agent mit Pair-Architektur",
             "",
-            "Einfach schreiben, ich antworte mit Schritt-fuer-Schritt-Feedback.",
-            "",
-            "Besonderheiten:",
-            "- Pair-Architektur: schnelle Router-Antworten, tiefe Worker-Analyse",
-            "- Live-Feedback bei jedem Arbeitsschritt",
-            "- Ich lerne dich kennen und passe meinen Stil an",
-            "- Unterbrich mich jederzeit",
+            "Schreib einfach, ich antworte mit Schritt-fuer-Schritt-Feedback.",
             "",
             "/status — Infos ueber mich",
             "/delete — Deine Daten loeschen (DSGVO)",
@@ -146,8 +140,8 @@ class NexusTelegramBot:
         status_lines = [
             "**Nexus v8.1** — " + status,
             "",
-            "Pair-Architektur: Router (fast) + Worker (capable)",
-            "Session: " + str(self.session_manager.stats()["active_sessions"]) + " aktiv",
+            "Architektur: Router (fast) + Worker (capable)",
+            "Sessions: " + str(self.session_manager.stats()["active_sessions"]) + " aktiv",
             "DSGVO: konform",
         ]
 
@@ -199,7 +193,7 @@ class NexusTelegramBot:
             self._interrupt_queue[user.id].append(text)
             await ctx.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
             await update.message.reply_text(
-                "Unterbrochen! Kurze Antwort kommt, dann setze ich fort."
+                "Unterbrochen. Kurze Antwort kommt, dann setze ich fort."
             )
             return
 
