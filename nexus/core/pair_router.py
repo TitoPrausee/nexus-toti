@@ -65,6 +65,11 @@ class PairRouter:
         (r"^(wie geht|how are|was machst|what'?s up)[\s?.!]*$", 0.85),
         (r"^(wer bist|was bist|who are|what are you)[\s?.!]*$", 0.85),
         (r"^(tschüss|bye|ciao|auf wiedersehen|see you|bis dann)[\s!.?]*$", 0.9),
+        # Extended: common conversational openers (no LLM needed)
+        (r"^(klingt gut|cool|geil|super|toll|nice|awesome|krass|perfekt)[\s!.?]*$", 0.85),
+        (r"^(stimmt|genau|exakt|richtig|logisch|klar|na klar)[\s!.?]*$", 0.85),
+        (r"^(verstehe|kapier|aha|oh|wirklich|echt|seriously)[\s!.?]*$", 0.80),
+        (r"^(lol|haha|hehe|xd|😄|😂)[\s!.?]*$", 0.90),
     ]
 
     COMPLEX_KEYWORDS = {
@@ -156,8 +161,18 @@ class PairRouter:
                 max_worker_tokens=self.worker_max_tokens,
             )
 
-        # Short messages without keywords -> likely trivial
-        if word_count <= 10 and complex_hits == 0:
+        # Short messages without keywords -> check trivial patterns first (free, no LLM)
+        if word_count <= 15 and complex_hits == 0:
+            trivial = self._trivial_response(msg_lower)
+            if trivial:
+                return RoutingDecision(
+                    intent=IntentType.TRIVIAL,
+                    confidence=0.9,
+                    router_response=trivial,
+                    needs_worker=False,
+                    context_compression="recent",
+                )
+            # No pattern match — still short, ask Router LLM
             return RoutingDecision(
                 intent=IntentType.TRIVIAL,
                 confidence=0.6,
@@ -201,20 +216,27 @@ class PairRouter:
         return content
 
     def _trivial_response(self, msg_lower):
-        if any(g in msg_lower for g in ["hi", "hey", "hallo", "moin", "servus", "hello"]):
+        if any(g in msg_lower for g in ["hi", "hey", "hallo", "moin", "servus", "hello", "yo", "na", "sup"]):
             return "Hey! Was geht?"
         if any(g in msg_lower for g in ["tschüss", "bye", "ciao", "auf wiedersehen", "see you"]):
             return "Bis dann!"
         if any(t in msg_lower for t in ["danke", "thanks", "thx", "cheers"]):
-            return "Gern geschehen!"
-        if any(y in msg_lower for y in ["ja", "yep", "ok", "okay", "klar"]):
+            return "Gern!"
+        if any(y in msg_lower for y in ["ja", "yep", "ok", "okay", "klar", "stimmt", "genau"]):
             return "Verstanden."
         if any(n in msg_lower for n in ["nein", "nope", "nö"]):
-            return "Ok, kein Problem."
+            return "Ok, kein Thema."
         if any(h in msg_lower for h in ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft"]):
-            return "Laeuft! Und bei dir?"
+            return "Laeuft! Und selbst?"
         if any(w in msg_lower for w in ["wer bist", "was bist", "who are"]):
-            return "Ich bin Nexus - dein KI-Agent. Schnell, direkt, loesungsorientiert."
+            return "Nexus. KI-Agent, aber kein Roboter."
+        # Short conversational reactions
+        if any(r in msg_lower for r in ["klingt gut", "cool", "geil", "super", "toll", "nice", "krass", "perfekt"]):
+            return "Freut mich!"
+        if any(r in msg_lower for r in ["verstehe", "kapier", "aha", "echt", "wirklich"]):
+            return "Jep."
+        if any(r in msg_lower for r in ["lol", "haha", "hehe"]):
+            return "😄"
         return ""
 
     def route(self, user_message, context=""):
