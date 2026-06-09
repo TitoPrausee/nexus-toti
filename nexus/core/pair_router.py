@@ -77,6 +77,9 @@ class PairRouter:
         "erstelle", "schreibe", "analysier", "recherchier", "vergleiche",
         "architektur", "design", "deploy", "erkläre wie", "warum funktioniert",
         "baue", "entwickle", "optimier", "migrat",
+        "kannst du", "kannst", "kann", "mache", "mach", "tun", "hilfe", "help",
+        "verbind", "verknüpf", "connect", "link", "gitlab", "github", "api",
+        "skill", "fähig", "feature", "funktion",
     }
 
     CRITICAL_KEYWORDS = {
@@ -179,12 +182,26 @@ class PairRouter:
                     context_compression="recent",
                 )
             # No pattern match — still short, ask Router LLM
+            # If the LLM can't give a short trivial answer, route to Worker
+            llm_response = self._classify_and_route_via_llm(user_message)
+            # If LLM response is very short (<=20 chars) and looks like an ack, keep trivial
+            # Otherwise this is a real question that needs Worker
+            if len(llm_response.strip()) <= 20 and not llm_response.strip().endswith("?"):
+                return RoutingDecision(
+                    intent=IntentType.TRIVIAL,
+                    confidence=0.6,
+                    router_response=llm_response,
+                    needs_worker=False,
+                    context_compression="recent",
+                )
+            # LLM gave a substantive response — needs Worker
             return RoutingDecision(
-                intent=IntentType.TRIVIAL,
-                confidence=0.6,
-                router_response=self._classify_and_route_via_llm(user_message),
-                needs_worker=False,
-                context_compression="recent",
+                intent=IntentType.COMPLEX,
+                confidence=0.7,
+                needs_worker=True,
+                model_key="default",
+                context_compression="summary",
+                max_worker_tokens=self.worker_max_tokens,
             )
 
         # Medium messages without clear intent -> Router decides
@@ -230,29 +247,67 @@ class PairRouter:
 
         return content
 
+    # Patterns that match the ENTIRE message (exact or near-exact)
+    # These must NOT match partial words in longer messages
+    TRIVIAL_EXACT = {
+        "hi", "hey", "hallo", "moin", "servus", "hello", "yo", "na", "sup",
+        "tschüss", "bye", "ciao", "auf wiedersehen", "see you",
+        "danke", "thanks", "thx", "cheers",
+        "ja", "yep", "ok", "okay", "klar", "stimmt", "genau",
+        "nein", "nope", "nö",
+        "klingt gut", "cool", "geil", "super", "toll", "nice", "krass", "perfekt",
+        "verstehe", "kapier", "aha", "echt", "wirklich",
+        "lol", "haha", "hehe",
+    }
+
+    def _is_only_trivial(self, msg_lower):
+        """Check if message is purely trivial (matches exact or is very short smalltalk)."""
+        stripped = msg_lower.strip().rstrip("!.?")
+
+        # Check known smalltalk phrases (multi-word)
+        smalltalk = ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft",
+                     "wer bist", "was bist", "who are"]
+        for s in smalltalk:
+            if s in stripped:
+                return True
+
+        # Check if the message IS an exact trivial word/phrase
+        if stripped in self.TRIVIAL_EXACT:
+            return True
+
+        # Very short (1-2 words) that start with a trivial word
+        words = stripped.split()
+        if len(words) <= 2 and words[0] in self.TRIVIAL_EXACT:
+            return True
+
+        return False
+
     def _trivial_response(self, msg_lower):
+        # Only match if the message is purely trivial
+        if not self._is_only_trivial(msg_lower):
+            return ""
+
         if any(g in msg_lower for g in ["hi", "hey", "hallo", "moin", "servus", "hello", "yo", "na", "sup"]):
             return "Hey! Was geht?"
         if any(g in msg_lower for g in ["tschüss", "bye", "ciao", "auf wiedersehen", "see you"]):
             return "Bis dann!"
         if any(t in msg_lower for t in ["danke", "thanks", "thx", "cheers"]):
             return "Gern!"
+        if any(h in msg_lower for h in ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft"]):
+            return "Laeuft! Und selbst?"
+        if any(w in msg_lower for w in ["wer bist", "was bist", "who are"]):
+            return "Nexus. Persoenlicher Assistent."
         if any(y in msg_lower for y in ["ja", "yep", "ok", "okay", "klar", "stimmt", "genau"]):
             return "Verstanden."
         if any(n in msg_lower for n in ["nein", "nope", "nö"]):
             return "Ok, kein Thema."
-        if any(h in msg_lower for h in ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft"]):
-            return "Laeuft! Und selbst?"
-        if any(w in msg_lower for w in ["wer bist", "was bist", "who are"]):
-            return "Nexus. Persönlicher Assistent."
-        # Short conversational reactions
         if any(r in msg_lower for r in ["klingt gut", "cool", "geil", "super", "toll", "nice", "krass", "perfekt"]):
             return "Freut mich!"
         if any(r in msg_lower for r in ["verstehe", "kapier", "aha", "echt", "wirklich"]):
             return "Jep."
         if any(r in msg_lower for r in ["lol", "haha", "hehe"]):
             return "😄"
-        return ""
+        return "Verstanden."
 
     def route(self, user_message, context=""):
         decision = self.classify_intent(user_message, context)
