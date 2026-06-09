@@ -4,8 +4,9 @@ Pair architecture: Router/Worker for efficient responses.
 Personalization: learns about users through natural conversation.
 DSGVO-compliant: per-user consent, data minimization, right to deletion.
 
-v8.2: Rich Telegram formatting — terminal-style steps, thought bubbles,
-      code blocks, message reactions, progressive feedback.
+v8.2.1: Live terminal block — asyncio.Queue + consumer task for real-time
+        step updates. Sync callback puts events on queue, async consumer
+        edits the Telegram message in real-time.
 """
 
 import os
@@ -24,7 +25,7 @@ from telegram.ext import (
 from nexus.core.agent import NexusAgent
 from nexus.core.session_manager import SessionManager
 from nexus.core.rate_limiter import RateLimiter
-from nexus.core.feedback import FeedbackEmitter, FeedbackType
+from nexus.core.feedback import FeedbackEmitter, FeedbackType, FeedbackEvent
 from nexus.core.personalization import PersonalizationEngine
 from nexus.interfaces.markdown_utils import escape_markdown_v2
 
@@ -41,29 +42,14 @@ STEP_ICONS = {
     FeedbackType.DONE: "🎯",
 }
 
-# Map tool names to human-readable labels + emojis
-TOOL_LABELS = {
-    "terminal": ("💻 Terminal", "`"),
-    "file_read": ("📖 Datei", ""),
-    "file_write": ("✏️ Schreiben", ""),
-    "file_search": ("🔍 Suche", ""),
-    "web_search": ("🌐 Recherche", ""),
-    "web_fetch": "🌐 Fetch",
-    "code_exec": ("⚡ Code", "`"),
-    "calculator": ("🔢 Rechner", ""),
-    "delegation": ("🤝 Team", ""),
-    "memory": ("🧠 Memory", ""),
-    "session": ("💾 Session", ""),
-    "time": ("🕐 Zeit", ""),
-}
-
 
 class NexusTelegramBot:
     """
     Telegram bot using python-telegram-bot.
 
-    v8.2: Rich formatting — step feedback as terminal blocks,
-          thought bubbles, reactions, code formatting.
+    v8.2.1: Live step feedback via asyncio.Queue + consumer task.
+            Terminal block edits the Telegram message in real-time
+            as each step arrives.
     """
 
     def __init__(self, agent: NexusAgent, config: dict = None):
@@ -84,6 +70,7 @@ class NexusTelegramBot:
         self._interrupt_queue = {}  # user_id -> list[pending messages]
         self._feedback_emitters = {}  # user_id -> FeedbackEmitter
         self._step_msg_ids = {}  # user_id -> message_id for terminal block
+        self._app = None  # Reference to the Application for bot API access
 
     def _parse_authorized_users(self):
         env_var = self.config.get("authorized_users_env", "NEXUS_TG_USERS")
@@ -115,6 +102,7 @@ class NexusTelegramBot:
 
         app = ApplicationBuilder().token(self.token).build()
         app.updater._read_timeout = 30
+        self._app = app
 
         app.add_handler(CommandHandler("start", self._cmd_start))
         app.add_handler(CommandHandler("help", self._cmd_help))
@@ -148,17 +136,16 @@ class NexusTelegramBot:
             await update.message.reply_text("Nicht autorisiert.")
             return
 
-        # Personalization: first-contact greeting
         greeting = self.agent.personalization.generate_greeting(str(user.id))
         await update.message.reply_text(greeting)
 
     async def _cmd_help(self, update, ctx):
         help_text = (
-            "⚡ **Nexus** — KI-Agent mit Team-Architektur\n\n"
-            "Schreib einfach, ich antworte mit Echtzeit-Feedback.\n\n"
+            "⚡ *Nexus* — KI\\-Agent mit Team\\-Architektur\n\n"
+            "Schreib einfach, ich antworte mit Echtzeit\\-Feedback\\.\n\n"
             "🔧 `/status` — Infos ueber mich\n"
-            "👥 `/team` — Team-Uebersicht\n"
-            "🗑 `/delete` — Deine Daten loeschen (DSGVO)"
+            "👥 `/team` — Team\\-Uebersicht\n"
+            "🗑 `/delete` — Deine Daten loeschen \\(DSGVO\\)"
         )
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
@@ -168,8 +155,8 @@ class NexusTelegramBot:
         status = "⚡ arbeitet" if processing else "✅ bereit"
 
         status_text = (
-            f"⚡ **Nexus v8.2** — {status}\n\n"
-            f"🏗 Architektur: Router + Worker + Team\n"
+            f"⚡ *Nexus v8\\.2* — {status}\n\n"
+            f"🏗 Architektur: Router \\+ Worker \\+ Team\n"
             f"📡 Sessions: {self.session_manager.stats()['active_sessions']} aktiv\n"
             f"🔒 DSGVO: konform"
         )
@@ -194,7 +181,6 @@ class NexusTelegramBot:
 
     async def _cmd_team(self, update, ctx):
         team_status = self.agent.team.get_team_status()
-        # Format with markdown
         lines = team_status.split("\n")
         formatted = []
         for line in lines:
@@ -233,39 +219,40 @@ class NexusTelegramBot:
 
         # ─── Normal processing ───────────────────────
         self._processing[user.id] = True
-        self._step_msg_ids.pop(user.id, None)  # reset step message
+        self._step_msg_ids.pop(user.id, None)
 
         # React to user message
         try:
             await update.message.set_reaction("👀")
         except Exception:
-            pass  # reactions not supported in all chats
+            pass
 
-        # Feedback emitter — collects steps, sends as terminal block
-        step_log = []  # collect all steps for progressive update
+        # Live feedback: asyncio.Queue for cross-thread communication
+        feedback_queue = asyncio.Queue()
+        step_log = []  # Shared list, populated by sync callback, read by async consumer
 
+        # Sync callback — called from the agent thread
         def on_step(event):
-            """Sync callback — collects steps and schedules async send."""
             step_log.append(event)
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self._update_terminal_block(chat_id, ctx, user.id, step_log),
-                        loop
-                    )
+                feedback_queue.put_nowait(event)
             except Exception:
                 pass
 
         emitter = FeedbackEmitter(callback=on_step)
         self._feedback_emitters[user.id] = emitter
 
+        # Start the live terminal consumer task
+        consumer_task = asyncio.create_task(
+            self._terminal_consumer(chat_id, ctx, user.id, feedback_queue, step_log)
+        )
+
         try:
             typing_task = asyncio.create_task(
                 self._typing_loop(chat_id, ctx)
             )
 
-            # Process with Pair architecture + personalization
+            # Process with Pair architecture + personalization (runs in thread)
             response = await asyncio.to_thread(
                 self.agent.process, text, str(user.id),
                 feedback=emitter, platform="telegram"
@@ -277,7 +264,11 @@ class NexusTelegramBot:
             except asyncio.CancelledError:
                 pass
 
-            # Mark done in terminal
+            # Signal consumer to finish
+            await feedback_queue.put(None)  # Sentinel
+            await consumer_task
+
+            # Finalize terminal block (mark as DONE)
             if step_log:
                 await self._finalize_terminal_block(chat_id, ctx, user.id, step_log)
 
@@ -316,6 +307,39 @@ class NexusTelegramBot:
             self._feedback_emitters.pop(user.id, None)
             self._step_msg_ids.pop(user.id, None)
 
+    # ─── Live Terminal Consumer ──────────────────────
+
+    async def _terminal_consumer(self, chat_id, ctx, user_id, queue, step_log):
+        """Async consumer: reads events from queue and live-edits the terminal message."""
+        last_edit_time = 0
+        MIN_EDIT_INTERVAL = 0.8  # Throttle edits to avoid rate limits
+
+        while True:
+            try:
+                # Wait for next event with timeout
+                event = await asyncio.wait_for(queue.get(), timeout=30.0)
+
+                # Sentinel = done
+                if event is None:
+                    break
+
+                # Throttle edits
+                now = asyncio.get_event_loop().time()
+                if now - last_edit_time < MIN_EDIT_INTERVAL:
+                    # Still update the step_log via queue, but skip Telegram edit
+                    continue
+
+                # Live-update the terminal block
+                await self._update_terminal_block(chat_id, ctx, user_id, step_log)
+                last_edit_time = now
+
+            except asyncio.TimeoutError:
+                # No new events for 30s — just keep waiting
+                continue
+            except Exception as e:
+                log.debug(f"Terminal consumer error: {e}")
+                continue
+
     # ─── Terminal-style Step Display ──────────────────
 
     async def _format_terminal_block(self, steps):
@@ -329,14 +353,14 @@ class NexusTelegramBot:
             msg = step.message[:35]
             if step.detail:
                 detail = step.detail[:25]
-                lines.append(f"│ {icon} {msg}: {detail}")
+                lines.append("│ {} {}: {}".format(icon, msg, detail))
             else:
-                lines.append(f"│ {icon} {msg}")
+                lines.append("│ {} {}".format(icon, msg))
         lines.append("└──────────────────────────────┘```")
         return "\n".join(lines)
 
     async def _update_terminal_block(self, chat_id, ctx, user_id, steps):
-        """Send or update the terminal block message."""
+        """Send or edit the terminal block message."""
         text = await self._format_terminal_block(steps)
         if not text:
             return
@@ -345,7 +369,6 @@ class NexusTelegramBot:
 
         try:
             if msg_id:
-                # Edit existing message
                 await ctx.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=msg_id,
@@ -353,7 +376,6 @@ class NexusTelegramBot:
                     parse_mode=ParseMode.MARKDOWN_V2,
                 )
             else:
-                # Send new message
                 msg = await ctx.bot.send_message(
                     chat_id=chat_id,
                     text=text,
@@ -361,14 +383,11 @@ class NexusTelegramBot:
                 )
                 self._step_msg_ids[user_id] = msg.message_id
         except Exception:
-            # If edit fails (content unchanged etc), just skip
             pass
 
     async def _finalize_terminal_block(self, chat_id, ctx, user_id, steps):
         """Final update to terminal block showing completion."""
-        # Add a "done" marker
-        from nexus.core.feedback import FeedbackEvent as FE
-        steps.append(FE(
+        steps.append(FeedbackEvent(
             type=FeedbackType.DONE,
             message="Fertig",
             detail="",
@@ -408,39 +427,27 @@ class NexusTelegramBot:
                 await asyncio.sleep(5)
 
     def _format_response(self, text):
-        """Format bot response with rich Telegram formatting.
-
-        Rules:
-        - Code/commands: monospace code blocks
-        - Step markers (numbered lists): bold
-        - Key terms: bold
-        - Thoughts/descriptions: italic
-        - Lines starting with special chars get styled
-        """
+        """Format bot response with rich Telegram formatting."""
         lines = text.split("\n")
         formatted = []
 
         for line in lines:
             stripped = line.strip()
 
-            # Code block or inline code — leave as-is
             if stripped.startswith("```") or stripped.startswith("`"):
                 formatted.append(line)
                 continue
 
-            # Numbered steps like "1. " -> bold the number
             if re.match(r'^(\d+\.)\s', stripped):
                 formatted.append(re.sub(r'^(\d+\.)\s', r'*\1* ', stripped))
                 continue
 
-            # Bullet points with bold headers like "- **Key**: value"
             if stripped.startswith("- **"):
                 formatted.append(line)
                 continue
 
-            # Section headers (line of === or ---)
             if re.match(r'^[=\-]{3,}$', stripped):
-                formatted.append(f"{'─' * 20}")
+                formatted.append("─" * 20)
                 continue
 
             formatted.append(line)
@@ -451,7 +458,6 @@ class NexusTelegramBot:
         """Send formatted response, splitting into chunks if needed."""
         MAX_LEN = 4096
 
-        # Try MarkdownV2 formatting first
         formatted = self._format_response(text)
 
         try:
@@ -464,9 +470,8 @@ class NexusTelegramBot:
                     parse_mode=ParseMode.MARKDOWN_V2,
                 )
                 if i < len(chunks) - 1:
-                    await asyncio.sleep(0.5)  # delay between chunks
+                    await asyncio.sleep(0.5)
         except Exception:
-            # Fallback: plain text
             chunks = self._split_text(text, MAX_LEN)
             for chunk in chunks:
                 await ctx.bot.send_message(
