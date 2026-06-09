@@ -417,6 +417,17 @@ class NexusAgent:
             if not tool_calls:
                 # No tool calls - final response
                 final_response = self._clean_response(content)
+                # If response is empty after cleaning (all was tool tags/think blocks),
+                # ask the LLM again with a nudge instead of returning "Verstanden."
+                if not final_response.strip():
+                    log.warning("Empty response after cleaning, asking LLM for summary")
+                    messages.append(Message("system",
+                        "Deine vorherige Antwort enthielt keine nutzbaren Inhalte. "
+                        "Fasse die bisherigen Ergebnisse zusammen und antworte dem Nutzer direkt, "
+                        "ohne Werkzeuge zu verwenden."
+                    ))
+                    final_response = ""
+                    continue
                 break
 
             # Add assistant response to messages
