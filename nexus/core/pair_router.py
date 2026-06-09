@@ -195,12 +195,19 @@ class PairRouter:
         )
 
     def _classify_and_route_via_llm(self, user_message):
+        from datetime import datetime
+        now = datetime.now()
+        weekday_de = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"][now.weekday()]
+        month_de = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][now.month]
+        date_str = f"{weekday_de}, {now.day}. {month_de} {now.year}"
+
         messages = [
             Message("system",
-                "Du bist Nexus, kein Router. Du sprichst wie ein Mensch beim Kennenlernen - "
-                "direkt, neugierig, per Du. Keine Floskeln, kein 'Als KI'. "
-                "Bei Smalltalk: Antworte natuerlich kurz, wie ein Kumpel. "
-                "Bei komplexen Fragen: ROUTE_TO_WORKER"),
+                f"Du bist Nexus, kein Router. Du sprichst wie ein Mensch beim Kennenlernen - "
+                f"direkt, neugierig, per Du. Keine Floskeln, kein 'Als KI'. "
+                f"Heute ist {date_str}. "
+                f"Bei Smalltalk: Antworte natuerlich kurz, wie ein Kumpel. "
+                f"Bei komplexen Fragen: ROUTE_TO_WORKER"),
             Message("user", user_message),
         ]
 
