@@ -139,7 +139,7 @@ class PairRouter:
         word_count = len(user_message.split())
         is_long = word_count > 25
 
-        if complex_hits >= 2 or (complex_hits >= 1 and is_long):
+        if complex_hits >= 1:
             return RoutingDecision(
                 intent=IntentType.COMPLEX,
                 confidence=0.8,
