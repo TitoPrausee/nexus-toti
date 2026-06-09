@@ -180,10 +180,10 @@ class PairRouter:
     def _classify_and_route_via_llm(self, user_message):
         messages = [
             Message("system",
-                "Du bist ein Router. Antworte HOECHSTENS 2 Saetze. "
-                "Klassifiziere kurz die Absicht des Nutzers und antworte direkt. "
-                "Wenn es eine einfache Begruessung oder small talk ist, antworte freundlich aber kurz. "
-                "Wenn es eine komplexe Frage ist, antworte nur: ROUTE_TO_WORKER"),
+                "Du bist Nexus, kein Router. Du sprichst wie ein Mensch beim Kennenlernen - "
+                "direkt, neugierig, per Du. Keine Floskeln, kein 'Als KI'. "
+                "Bei Smalltalk: Antworte natuerlich kurz, wie ein Kumpel. "
+                "Bei komplexen Fragen: ROUTE_TO_WORKER"),
             Message("user", user_message),
         ]
 
@@ -211,8 +211,8 @@ class PairRouter:
             return "Verstanden."
         if any(n in msg_lower for n in ["nein", "nope", "nö"]):
             return "Ok, kein Problem."
-        if any(h in msg_lower for h in ["wie geht", "how are", "was machst"]):
-            return "Laeuft! Was kann ich fuer dich tun?"
+        if any(h in msg_lower for h in ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft"]):
+            return "Laeuft! Und bei dir?"
         if any(w in msg_lower for w in ["wer bist", "was bist", "who are"]):
             return "Ich bin Nexus - dein KI-Agent. Schnell, direkt, loesungsorientiert."
         return ""
