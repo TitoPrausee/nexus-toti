@@ -189,6 +189,15 @@ class NexusAgent:
         """Build the full system prompt from soul + tools + user context + personalization."""
         parts = []
 
+        # 0. Current date/time — always first so LLM knows the actual date
+        from datetime import datetime
+        now = datetime.now()
+        weekday_de = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"][now.weekday()]
+        month_de = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][now.month]
+        parts.append(
+            f"Aktuelles Datum: {weekday_de}, {now.day}. {month_de} {now.year}, {now.strftime('%H:%M')} Uhr."
+        )
+
         # 1. Soul identity
         parts.append(self.soul.get_system_prompt(user_id))
 
