@@ -425,12 +425,13 @@ class MemorySystem:
 
     # ─── L3: Long-term Memory ──────────────────────────
 
-    def remember(self, content: str, category: str = "general", importance: float = 0.7):
+    def remember(self, content: str, category: str = "general", importance: float = 0.7, user_id: str = ""):
         """Store an important fact in long-term memory.
 
         v7.1: Improved deduplication — fuzzy matching by topic overlap,
         not just exact string match.
         v7.2: Auto-indexes new entries for vector search.
+        v8.2: DSGVO — user_id field for per-user data attribution.
         """
         content_stripped = content.strip()
 
@@ -465,7 +466,7 @@ class MemorySystem:
                 self._index_vector_store()
                 return
 
-        self.l3.append({
+        entry = {
             "content": content_stripped,
             "category": category,
             "importance": importance,
@@ -473,7 +474,12 @@ class MemorySystem:
             "access_count": 1,
             "last_accessed": time.time(),
             "topics": self._extract_topics(content_stripped),
-        })
+        }
+        # DSGVO: tag with user_id so data can be attributed and deleted
+        if user_id:
+            entry["user_id"] = user_id
+
+        self.l3.append(entry)
 
         # Keep within bounds — remove lowest relevance score
         if len(self.l3) > self.l3_max_entries:
