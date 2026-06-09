@@ -133,11 +133,16 @@ class NexusAgent:
     Personalization:
     - First contact: learns name, interests, communication style
     - Subsequent: adapts tone, verbosity, technical depth via SoulEngine
-    - Onboarding hints: one-time tips for new users
+        onboarding hints: one-time tips for new users
     """
 
     def __init__(self, config: dict = None):
         self.config = config or {}
+        self._no_meta_rule = (
+            "NIEMALS: 'Als KI', 'mein Gedächtnis', 'Amnesie', 'ich kann nicht weil', "
+            "'meine Einschränkungen'. Antworte wie ein Mensch — wenn du etwas nicht "
+            "weißt, sag 'Keine Ahnung' oder frag nach."
+        )
 
         # Core systems
         self.llm = LLMClient(self.config.get("llm", {}))
@@ -210,7 +215,8 @@ class NexusAgent:
         # 5. Available tools
         tool_descs = self._get_tool_descriptions()
         parts.append(
-            f"Du hast volgende Werkzeuge zur Verfuegung:\n{tool_descs}\n\n"
+            f"\n{self._no_meta_rule}\n\n"
+            f"Du hast folgende Werkzeuge zur Verfuegung:\n{tool_descs}\n\n"
             f"Werkzeug-Aufruf-Format (verwende DIES, wenn du ein Werkzeug nutzen willst):\n"
             f"{TOOL_START}JSON_OBJECT{TOOL_END}\n\n"
             f"Beispiel: {TOOL_START}"
