@@ -28,6 +28,7 @@ from nexus.core.conversations import ConversationStore
 from nexus.core.feedback import FeedbackEmitter, FeedbackType
 from nexus.core.pair_router import PairRouter, IntentType, RoutingDecision
 from nexus.core.personalization import PersonalizationEngine
+from nexus.core.agent_team import AgentTeam
 from nexus.soul import SoulEngine
 
 log = logging.getLogger("nexus.agent")
@@ -182,6 +183,9 @@ class NexusAgent:
         self._interrupt_queue: list = []
         self._is_processing = False
 
+        # v8.2: Agent Team (organization-structured delegation)
+        self.team = AgentTeam(self.llm, self.config.get("team", {}))
+
         # v8.1: Onboarding hints tracking (per user)
         self._shown_hints: dict = {}  # user_id -> set of hint IDs
 
@@ -236,6 +240,9 @@ class NexusAgent:
             f"- Verwende Werkzeuge wenn sie helfen, nicht aus Spass\n"
             f"- Beende Werkzeug-Aufrufe mit einer natuerlichen Antwort\n"
             f"- Wenn du eine Aufgabe delegieren willst, nutze 'delegation'\n"
+            f"- Wenn du etwas NICHT WEISST oder NICHT KANNST: Recherche es (web_search) oder delegiere an Research\n"
+            f"- Wenn etwas gebaut/erstellt werden muss: delegiere an Engineering oder mode=full_team\n"
+            f"- DU BIST SELBSTSTAENDIG: Nie 'das kann ich nicht' - finde die Loesung\n"
             f"- Wenn ein Werkzeug fehlschlaegt, versuche es ANDERS, nicht nochmal gleich\n"
             f"- Max {self.max_duplicate_calls}x derselbe Aufruf pro Konversation\n"
             f"- Antworte auf Deutsch wenn der Nutzer Deutsch spricht, sonst in der Sprache des Nutzers\n"
@@ -255,7 +262,7 @@ class NexusAgent:
             "code_exec": "Python-Code ausfuehren - code (Pflicht), timeout (optional)",
             "calculator": "Berechnung - expression (Pflicht)",
             "time": "Aktuelle Datum/Zeit - keine Argumente",
-            "delegation": "Aufgabe an Spezialisten - task (Pflicht), specialist (coding/research/analysis/creative/fast), context (optional)",
+            "delegation": "Aufgabe an Team-Abteilung delegieren - task (Pflicht), specialist (ceo/research/engineering/creative/operations/auto), context (optional), mode (single/full_team). auto=CEO entscheidet. full_team=Research+Engineering Kette fuer komplexe Aufgaben.",
             "memory": "Gedaechtnis - action (add/replace/remove/read), content, category, importance",
             "session": "Session-Verwaltung - action (start/save/list/delete), session_id, user_id, summary",
         }
@@ -774,25 +781,35 @@ class NexusAgent:
         task = args.get("task", "")
         specialist = args.get("specialist", "coding")
         context = args.get("context", "")
-        model_map = {
-            "coding": "coding",
+        mode = args.get("mode", "single")  # single or full_team
+
+        # Map old specialist names to team departments
+        dept_map = {
+            "coding": "engineering",
             "research": "research",
-            "analysis": "analysis",
+            "analysis": "operations",
             "creative": "creative",
-            "fast": "fast",
+            "fast": "operations",
+            "engineering": "engineering",
+            "operations": "operations",
+            "ceo": "ceo",
         }
-        model_key = model_map.get(specialist, "default")
-        prompt = f"Spezial-Aufgabe ({specialist}): {task}"
-        if context:
-            prompt += f"\nKontext: {context}"
-        messages = [
-            Message("system", f"Du bist ein Spezialist fuer {specialist}. Loese die Aufgabe praezise."),
-            Message("user", prompt),
-        ]
-        response = self.llm.chat(messages, model_key=model_key)
-        if response.success:
-            return ToolResult(True, response.content, data={"model": response.model, "tokens": response.total_tokens})
-        return ToolResult(False, "", f"Delegation fehlgeschlagen: {response.error}")
+        department = dept_map.get(specialist, "auto")
+
+        if mode == "full_team":
+            # Full research-and-build cycle: CEO -> Research -> Engineering
+            result_text = self.team.research_and_build(task, context)
+            return ToolResult(True, result_text, data={"mode": "full_team"})
+        else:
+            # Single department delegation
+            team_task = self.team.delegate(task, department=department, context=context)
+            if team_task.status == "completed":
+                return ToolResult(True, team_task.result, data={
+                    "department": team_task.department,
+                    "task_id": team_task.task_id,
+                    "elapsed": round(team_task.elapsed, 1),
+                })
+            return ToolResult(False, "", f"Delegation fehlgeschlagen: {team_task.result}")
 
     def _handle_session_tool(self, args):
         action = args.get("action", "list")
