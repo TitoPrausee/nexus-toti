@@ -213,20 +213,16 @@ class PersonalizationEngine:
         """Greeting tailored to onboarding phase."""
         lang = onboard.language or "de"
         questions = self.ONBOARDING_QUESTIONS.get(lang, self.ONBOARDING_QUESTIONS["de"])
-        
+
         if onboard.onboarding_phase == 0:
-            # First contact
-            return (
-                "Hey! Ich bin Nexus, dein KI-Agent. "
-                f"{questions[0]}"
-            )
+            return "Hey! Nexus hier. " + questions[0]
         elif onboard.onboarding_phase == 1:
             name = onboard.name or "Du"
-            return f"Hey {name}! {questions[1]}"
+            return f"Hey {name}! " + questions[1]
         elif onboard.onboarding_phase == 2:
             return questions[2]
-        
-        return "Was kann ich für dich tun?"
+
+        return "Was gibt's?"
 
     def _time_greeting(self) -> str:
         """Time-aware greeting."""
