@@ -27,6 +27,7 @@ from nexus.core.session_manager import SessionManager
 from nexus.core.rate_limiter import RateLimiter
 from nexus.core.feedback import FeedbackEmitter, FeedbackType, FeedbackEvent
 from nexus.core.personalization import PersonalizationEngine
+from nexus.core.dsgvo import DSGVOCompliance
 from nexus.interfaces.markdown_utils import escape_markdown_v2, format_markdown_v2, split_markdown_v2
 
 log = logging.getLogger("nexus.telegram")
@@ -71,6 +72,9 @@ class NexusTelegramBot:
         self._feedback_emitters = {}  # user_id -> FeedbackEmitter
         self._step_msg_ids = {}  # user_id -> message_id for terminal block
         self._app = None  # Reference to the Application for bot API access
+        self.dsgvo = DSGVOCompliance(
+            data_dir=self.config.get("dsgvo", {}).get("data_dir", "data/dsgvo")
+        )
 
     def _parse_authorized_users(self):
         env_var = self.config.get("authorized_users_env", "NEXUS_TG_USERS")
@@ -108,6 +112,8 @@ class NexusTelegramBot:
         app.add_handler(CommandHandler("help", self._cmd_help))
         app.add_handler(CommandHandler("status", self._cmd_status))
         app.add_handler(CommandHandler("delete", self._cmd_delete))
+        app.add_handler(CommandHandler("data", self._cmd_data))
+        app.add_handler(CommandHandler("consent", self._cmd_consent))
         app.add_handler(CommandHandler("team", self._cmd_team))
         app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, self._handle_message
@@ -132,11 +138,24 @@ class NexusTelegramBot:
 
     async def _cmd_start(self, update, ctx):
         user = update.effective_user
+        uid = str(user.id)
         if self.authorized_users and user.id not in self.authorized_users:
             await update.message.reply_text("Nicht autorisiert.")
             return
 
-        greeting = self.agent.personalization.generate_greeting(str(user.id))
+        # DSGVO: Consent gate
+        if self.dsgvo.needs_consent(uid):
+            notice = self.dsgvo.get_privacy_notice()
+            await update.message.reply_text(notice, parse_mode=ParseMode.MARKDOWN_V2)
+            # Auto-give consent on /start (user explicitly started the bot)
+            self.dsgvo.give_consent(uid)
+            await update.message.reply_text(
+                "✅ Einwilligung erteilt\\. Schreib mir einfach\\!",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        greeting = self.agent.personalization.generate_greeting(uid)
         await update.message.reply_text(greeting)
 
     async def _cmd_help(self, update, ctx):
@@ -145,7 +164,9 @@ class NexusTelegramBot:
             "Schreib einfach, ich antworte mit Echtzeit\\-Feedback\\.\n\n"
             "🔧 `/status` — Infos ueber mich\n"
             "👥 `/team` — Team\\-Uebersicht\n"
-            "🗑 `/delete` — Deine Daten loeschen \\(DSGVO\\)"
+            "📋 `/data` — Deine Daten einsehen \\(DSGVO Art\\. 15\\)\n"
+            "🗑 `/delete` — Deine Daten löschen \\(DSGVO Art\\. 17\\)\n"
+            "🔒 `/consent` — Einwilligung verwalten"
         )
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
@@ -167,17 +188,50 @@ class NexusTelegramBot:
 
         await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
 
-    async def _cmd_delete(self, update, ctx):
+    async def _cmd_data(self, update, ctx):
+        """DSGVO Art. 15 — Right of access: show all stored user data."""
         user = update.effective_user
-        self.agent.memory.clear_user(user.id)
-        self.session_manager.remove(user.id)
         uid = str(user.id)
-        if uid in self.agent.personalization._onboardings:
-            del self.agent.personalization._onboardings[uid]
-        if uid in self.agent.soul.relationships:
-            del self.agent.soul.relationships[uid]
-            self.agent.soul.save()
-        await update.message.reply_text("🗑 Alle deine Daten wurden geloescht. DSGVO-konform.")
+        inventory = self.dsgvo.get_user_data_inventory(uid, self.session_manager)
+        text = self.dsgvo.format_data_inventory(inventory)
+        # Escape for MarkdownV2
+        text = format_markdown_v2(text)
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _cmd_delete(self, update, ctx):
+        """DSGVO Art. 17 — Right to erasure: delete all user data."""
+        user = update.effective_user
+        uid = str(user.id)
+        result = self.dsgvo.delete_all_user_data(uid, self.session_manager)
+        cats = ", ".join(result.get("categories_deleted", []))
+        count = result.get("total_entries_removed", 0)
+        text = (
+            f"🗑 Alle deine Daten wurden geloescht\\.\n\n"
+            f"Geloeschte Kategorien: {escape_markdown_v2(cats)}\n"
+            f"Eintraege entfernt: {count}\n\n"
+            f"DSGVO\\-konform \\(Art\\. 17\\)\\."
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _cmd_consent(self, update, ctx):
+        """DSGVO Art. 7 — Manage consent."""
+        user = update.effective_user
+        uid = str(user.id)
+        info = self.dsgvo.get_consent_info(uid)
+
+        if info.get("has_consent"):
+            text = (
+                f"✅ Einwilligung erteilt\n\n"
+                f"Version: {escape_markdown_v2(str(info.get('version', '?')))}\n"
+                f"Seit: {escape_markdown_v2(str(info.get('timestamp', '?'))[:10])}\n\n"
+                f"/delete widerruft die Einwilligung automatisch\\."
+            )
+        else:
+            text = (
+                "❌ Keine Einwilligung vorhanden\\.\n\n"
+                "/start — Einwilligung erteilen"
+            )
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_team(self, update, ctx):
         team_status = self.agent.team.get_team_status()
@@ -202,6 +256,18 @@ class NexusTelegramBot:
         if self.authorized_users and user.id not in self.authorized_users:
             await update.message.reply_text("Nicht autorisiert.")
             return
+
+        # DSGVO: Consent gate — no processing without consent
+        uid = str(user.id)
+        if self.dsgvo.needs_consent(uid):
+            await update.message.reply_text(
+                "🔒 Bitte zuerst /start ausfuehren um die Datenschutzrichtlinie zu akzeptieren\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        # Track interaction for retention
+        self.dsgvo.touch_interaction(uid)
 
         # Rate limiting
         if not self.rate_limiter.allow(user.id):
