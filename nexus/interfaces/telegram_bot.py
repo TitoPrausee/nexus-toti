@@ -1,8 +1,11 @@
 """
-NEXUS v8.1 — Telegram Bot Interface (python-telegram-bot)
+NEXUS v8.2 — Telegram Bot Interface (python-telegram-bot)
 Pair architecture: Router/Worker for efficient responses.
 Personalization: learns about users through natural conversation.
 DSGVO-compliant: per-user consent, data minimization, right to deletion.
+
+v8.2: Rich Telegram formatting — terminal-style steps, thought bubbles,
+      code blocks, message reactions, progressive feedback.
 """
 
 import os
@@ -12,7 +15,7 @@ import logging
 from datetime import datetime
 
 from telegram import Update
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     ContextTypes, filters
@@ -21,20 +24,46 @@ from telegram.ext import (
 from nexus.core.agent import NexusAgent
 from nexus.core.session_manager import SessionManager
 from nexus.core.rate_limiter import RateLimiter
-from nexus.core.feedback import FeedbackEmitter
+from nexus.core.feedback import FeedbackEmitter, FeedbackType
 from nexus.core.personalization import PersonalizationEngine
 from nexus.interfaces.markdown_utils import escape_markdown_v2
 
 log = logging.getLogger("nexus.telegram")
 
+# ─── Terminal-style step formatting ─────────────────────────
+
+STEP_ICONS = {
+    FeedbackType.THINKING: "💭",
+    FeedbackType.LLM_CALL: "⚡",
+    FeedbackType.TOOL_START: "🔧",
+    FeedbackType.TOOL_RESULT: "✅",
+    FeedbackType.PROGRESS: "📡",
+    FeedbackType.DONE: "🎯",
+}
+
+# Map tool names to human-readable labels + emojis
+TOOL_LABELS = {
+    "terminal": ("💻 Terminal", "`"),
+    "file_read": ("📖 Datei", ""),
+    "file_write": ("✏️ Schreiben", ""),
+    "file_search": ("🔍 Suche", ""),
+    "web_search": ("🌐 Recherche", ""),
+    "web_fetch": "🌐 Fetch",
+    "code_exec": ("⚡ Code", "`"),
+    "calculator": ("🔢 Rechner", ""),
+    "delegation": ("🤝 Team", ""),
+    "memory": ("🧠 Memory", ""),
+    "session": ("💾 Session", ""),
+    "time": ("🕐 Zeit", ""),
+}
+
 
 class NexusTelegramBot:
     """
     Telegram bot using python-telegram-bot.
-    Only needs BOT_TOKEN — no api_id/api_hash required.
 
-    v8.1: Pair architecture for efficient routing.
-    v8.0: Typing indicators, step feedback, interrupt handling.
+    v8.2: Rich formatting — step feedback as terminal blocks,
+          thought bubbles, reactions, code formatting.
     """
 
     def __init__(self, agent: NexusAgent, config: dict = None):
@@ -54,6 +83,7 @@ class NexusTelegramBot:
         self._processing = {}  # user_id -> bool
         self._interrupt_queue = {}  # user_id -> list[pending messages]
         self._feedback_emitters = {}  # user_id -> FeedbackEmitter
+        self._step_msg_ids = {}  # user_id -> message_id for terminal block
 
     def _parse_authorized_users(self):
         env_var = self.config.get("authorized_users_env", "NEXUS_TG_USERS")
@@ -123,57 +153,54 @@ class NexusTelegramBot:
         await update.message.reply_text(greeting)
 
     async def _cmd_help(self, update, ctx):
-        help_lines = [
-            "**Nexus** — KI-Agent mit Pair-Architektur",
-            "",
-            "Schreib einfach, ich antworte mit Schritt-fuer-Schritt-Feedback.",
-            "",
-            "/status - Infos ueber mich",
-            "/team - Team-Uebersicht",
-            "/status - Infos ueber mich",
-            "/team - Team-Uebersicht",
-            "/delete — Deine Daten loeschen (DSGVO)",
-        ]
-        await update.message.reply_text(chr(10).join(help_lines))
+        help_text = (
+            "⚡ **Nexus** — KI-Agent mit Team-Architektur\n\n"
+            "Schreib einfach, ich antworte mit Echtzeit-Feedback.\n\n"
+            "🔧 `/status` — Infos ueber mich\n"
+            "👥 `/team` — Team-Uebersicht\n"
+            "🗑 `/delete` — Deine Daten loeschen (DSGVO)"
+        )
+        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_status(self, update, ctx):
         user = update.effective_user
         processing = self._processing.get(user.id, False)
-        status = "arbeitet" if processing else "bereit"
+        status = "⚡ arbeitet" if processing else "✅ bereit"
 
-        status_lines = [
-            "**Nexus v8.2** — " + status,
-            "",
-            "Architektur: Router (fast) + Worker (capable)",
-            "Sessions: " + str(self.session_manager.stats()["active_sessions"]) + " aktiv",
-            "DSGVO: konform",
-        ]
+        status_text = (
+            f"⚡ **Nexus v8.2** — {status}\n\n"
+            f"🏗 Architektur: Router + Worker + Team\n"
+            f"📡 Sessions: {self.session_manager.stats()['active_sessions']} aktiv\n"
+            f"🔒 DSGVO: konform"
+        )
 
         if self.agent._iteration_budget:
-            status_lines.append(
-                "Budget: " + self.agent._iteration_budget.summary()
-            )
+            budget = self.agent._iteration_budget
+            status_text += f"\n📊 Budget: {budget.calls_remaining} calls uebrig"
 
-        await update.message.reply_text(chr(10).join(status_lines))
+        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_delete(self, update, ctx):
         user = update.effective_user
         self.agent.memory.clear_user(user.id)
         self.session_manager.remove(user.id)
-        # Also clear personalization state
         uid = str(user.id)
         if uid in self.agent.personalization._onboardings:
             del self.agent.personalization._onboardings[uid]
-        # Clear soul relationship
         if uid in self.agent.soul.relationships:
             del self.agent.soul.relationships[uid]
             self.agent.soul.save()
-        await update.message.reply_text("Alle deine Daten wurden geloescht. DSGVO-konform.")
-
+        await update.message.reply_text("🗑 Alle deine Daten wurden geloescht. DSGVO-konform.")
 
     async def _cmd_team(self, update, ctx):
         team_status = self.agent.team.get_team_status()
-        await update.message.reply_text(team_status)
+        # Format with markdown
+        lines = team_status.split("\n")
+        formatted = []
+        for line in lines:
+            line = escape_markdown_v2(line)
+            formatted.append(line)
+        await update.message.reply_text("\n".join(formatted), parse_mode=ParseMode.MARKDOWN_V2)
 
     # ─── Message Handler ───────────────────────────────
 
@@ -192,7 +219,7 @@ class NexusTelegramBot:
 
         # Rate limiting
         if not self.rate_limiter.allow(user.id):
-            await update.message.reply_text("Etwas zu schnell. Kurz warten...")
+            await update.message.reply_text("⏳ Etwas zu schnell. Kurz warten...")
             return
 
         # ─── Interrupt handling ──────────────────────
@@ -201,24 +228,36 @@ class NexusTelegramBot:
                 self._interrupt_queue[user.id] = []
             self._interrupt_queue[user.id].append(text)
             await ctx.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            await update.message.reply_text(
-                "Unterbrochen. Kurze Antwort kommt, dann setze ich fort."
-            )
+            await update.message.reply_text("⏸ Unterbrochen. Kurze Antwort, dann setze ich fort.")
             return
 
         # ─── Normal processing ───────────────────────
         self._processing[user.id] = True
+        self._step_msg_ids.pop(user.id, None)  # reset step message
 
-        # Feedback emitter — sync callback that sends step updates via Telegram
-        # (async callback was causing "coroutine was never awaited" warnings)
-        loop = asyncio.get_event_loop()
-        emitter = FeedbackEmitter(
-            callback=lambda event, chat_id=chat_id, ctx=ctx, loop=loop: (
-                asyncio.run_coroutine_threadsafe(
-                    self._send_step_feedback(chat_id, ctx, event), loop
-                ) if loop.is_running() else None
-            )
-        )
+        # React to user message
+        try:
+            await update.message.set_reaction("👀")
+        except Exception:
+            pass  # reactions not supported in all chats
+
+        # Feedback emitter — collects steps, sends as terminal block
+        step_log = []  # collect all steps for progressive update
+
+        def on_step(event):
+            """Sync callback — collects steps and schedules async send."""
+            step_log.append(event)
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self._update_terminal_block(chat_id, ctx, user.id, step_log),
+                        loop
+                    )
+            except Exception:
+                pass
+
+        emitter = FeedbackEmitter(callback=on_step)
         self._feedback_emitters[user.id] = emitter
 
         try:
@@ -238,29 +277,123 @@ class NexusTelegramBot:
             except asyncio.CancelledError:
                 pass
 
+            # Mark done in terminal
+            if step_log:
+                await self._finalize_terminal_block(chat_id, ctx, user.id, step_log)
+
+            # Change reaction from 👀 to ✅
+            try:
+                await update.message.set_reaction("✅")
+            except Exception:
+                pass
+
+            # Send the actual response
             await self._send_response(chat_id, ctx, response)
 
             # Check for queued interrupts
             pending = self._interrupt_queue.pop(user.id, [])
             if pending:
-                queued_text = chr(10).join(
+                queued_text = "\n".join(
                     "  " + m[:80] for m in pending[:5]
                 )
                 await ctx.bot.send_message(
                     chat_id=chat_id,
-                    text="Eingereihte Nachrichten:\n" + queued_text +
-                         "\n\n_Spricht dein Anliegen? Sonst einfach neu schreiben._"
+                    text=f"📥 Eingereihte Nachrichten:\n{queued_text}\n\n_Spricht dein Anliegen? Sonst einfach neu schreiben._"
                 )
 
         except Exception as e:
             log.error(f"Error processing message: {e}", exc_info=True)
+            try:
+                await update.message.set_reaction("❌")
+            except Exception:
+                pass
             await ctx.bot.send_message(
                 chat_id=chat_id,
-                text="Fehler: " + str(e)[:200]
+                text=f"❌ Fehler: {str(e)[:200]}"
             )
         finally:
             self._processing[user.id] = False
             self._feedback_emitters.pop(user.id, None)
+            self._step_msg_ids.pop(user.id, None)
+
+    # ─── Terminal-style Step Display ──────────────────
+
+    async def _format_terminal_block(self, steps):
+        """Format step log as a terminal-style code block."""
+        if not steps:
+            return ""
+
+        lines = ["```\n┌─ Nexus Terminal ─────────────┐"]
+        for step in steps[-8:]:  # show last 8 steps max
+            icon = STEP_ICONS.get(step.type, "·")
+            msg = step.message[:35]
+            if step.detail:
+                detail = step.detail[:25]
+                lines.append(f"│ {icon} {msg}: {detail}")
+            else:
+                lines.append(f"│ {icon} {msg}")
+        lines.append("└──────────────────────────────┘```")
+        return "\n".join(lines)
+
+    async def _update_terminal_block(self, chat_id, ctx, user_id, steps):
+        """Send or update the terminal block message."""
+        text = await self._format_terminal_block(steps)
+        if not text:
+            return
+
+        msg_id = self._step_msg_ids.get(user_id)
+
+        try:
+            if msg_id:
+                # Edit existing message
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            else:
+                # Send new message
+                msg = await ctx.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+                self._step_msg_ids[user_id] = msg.message_id
+        except Exception:
+            # If edit fails (content unchanged etc), just skip
+            pass
+
+    async def _finalize_terminal_block(self, chat_id, ctx, user_id, steps):
+        """Final update to terminal block showing completion."""
+        # Add a "done" marker
+        from nexus.core.feedback import FeedbackEvent as FE
+        steps.append(FE(
+            type=FeedbackType.DONE,
+            message="Fertig",
+            detail="",
+            icon="🎯",
+            step=steps[-1].step + 1 if steps else 0,
+        ))
+        text = await self._format_terminal_block(steps)
+
+        msg_id = self._step_msg_ids.get(user_id)
+        try:
+            if msg_id:
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            else:
+                await ctx.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+        except Exception:
+            pass
 
     # ─── Helpers ────────────────────────────────────────
 
@@ -274,28 +407,66 @@ class NexusTelegramBot:
             except Exception:
                 await asyncio.sleep(5)
 
-    async def _send_step_feedback(self, chat_id, ctx, message):
-        try:
-            await ctx.bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode=None,
-            )
-        except Exception as e:
-            log.debug(f"Step feedback send error (non-critical): {e}")
+    def _format_response(self, text):
+        """Format bot response with rich Telegram formatting.
+
+        Rules:
+        - Code/commands: monospace code blocks
+        - Step markers (numbered lists): bold
+        - Key terms: bold
+        - Thoughts/descriptions: italic
+        - Lines starting with special chars get styled
+        """
+        lines = text.split("\n")
+        formatted = []
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Code block or inline code — leave as-is
+            if stripped.startswith("```") or stripped.startswith("`"):
+                formatted.append(line)
+                continue
+
+            # Numbered steps like "1. " -> bold the number
+            if re.match(r'^(\d+\.)\s', stripped):
+                formatted.append(re.sub(r'^(\d+\.)\s', r'*\1* ', stripped))
+                continue
+
+            # Bullet points with bold headers like "- **Key**: value"
+            if stripped.startswith("- **"):
+                formatted.append(line)
+                continue
+
+            # Section headers (line of === or ---)
+            if re.match(r'^[=\-]{3,}$', stripped):
+                formatted.append(f"{'─' * 20}")
+                continue
+
+            formatted.append(line)
+
+        return "\n".join(formatted)
 
     async def _send_response(self, chat_id, ctx, text):
+        """Send formatted response, splitting into chunks if needed."""
         MAX_LEN = 4096
+
+        # Try MarkdownV2 formatting first
+        formatted = self._format_response(text)
+
         try:
-            escaped = escape_markdown_v2(text)
+            escaped = escape_markdown_v2(formatted)
             chunks = self._split_text(escaped, MAX_LEN)
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 await ctx.bot.send_message(
                     chat_id=chat_id,
                     text=chunk,
-                    parse_mode="MarkdownV2",
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
+                if i < len(chunks) - 1:
+                    await asyncio.sleep(0.5)  # delay between chunks
         except Exception:
+            # Fallback: plain text
             chunks = self._split_text(text, MAX_LEN)
             for chunk in chunks:
                 await ctx.bot.send_message(
