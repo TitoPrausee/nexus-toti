@@ -195,7 +195,8 @@ class NexusAgent:
         weekday_de = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"][now.weekday()]
         month_de = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][now.month]
         parts.append(
-            f"Aktuelles Datum: {weekday_de}, {now.day}. {month_de} {now.year}, {now.strftime('%H:%M')} Uhr."
+            f"WICHTIG — Aktuelles Datum: {weekday_de}, {now.day}. {month_de} {now.year}, {now.strftime('%H:%M')} Uhr. "
+            f"Beantworte Datumsfragen NUR mit diesem Datum, niemals mit Trainingswissen."
         )
 
         # 1. Soul identity
