@@ -90,6 +90,7 @@ class NexusTelegramBot:
         app.add_handler(CommandHandler("help", self._cmd_help))
         app.add_handler(CommandHandler("status", self._cmd_status))
         app.add_handler(CommandHandler("delete", self._cmd_delete))
+        app.add_handler(CommandHandler("team", self._cmd_team))
         app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, self._handle_message
         ))
@@ -127,7 +128,10 @@ class NexusTelegramBot:
             "",
             "Schreib einfach, ich antworte mit Schritt-fuer-Schritt-Feedback.",
             "",
-            "/status — Infos ueber mich",
+            "/status - Infos ueber mich",
+            "/team - Team-Uebersicht",
+            "/status - Infos ueber mich",
+            "/team - Team-Uebersicht",
             "/delete — Deine Daten loeschen (DSGVO)",
         ]
         await update.message.reply_text(chr(10).join(help_lines))
@@ -138,7 +142,7 @@ class NexusTelegramBot:
         status = "arbeitet" if processing else "bereit"
 
         status_lines = [
-            "**Nexus v8.1** — " + status,
+            "**Nexus v8.2** — " + status,
             "",
             "Architektur: Router (fast) + Worker (capable)",
             "Sessions: " + str(self.session_manager.stats()["active_sessions"]) + " aktiv",
@@ -165,6 +169,11 @@ class NexusTelegramBot:
             del self.agent.soul.relationships[uid]
             self.agent.soul.save()
         await update.message.reply_text("Alle deine Daten wurden geloescht. DSGVO-konform.")
+
+
+    async def _cmd_team(self, update, ctx):
+        team_status = self.agent.team.get_team_status()
+        await update.message.reply_text(team_status)
 
     # ─── Message Handler ───────────────────────────────
 
