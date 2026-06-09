@@ -161,8 +161,10 @@ class PairRouter:
                 max_worker_tokens=self.worker_max_tokens,
             )
 
-        # Short messages without keywords -> check trivial patterns first (free, no LLM)
-        if word_count <= 15 and complex_hits == 0:
+        # Short single-topic messages without keywords -> check trivial patterns first (free, no LLM)
+        # Multi-clause messages (with . ! ? separating thoughts) need LLM context
+        has_multi_clauses = any(sep in user_message for sep in [". ", "! ", "? "]) and word_count > 5
+        if word_count <= 15 and complex_hits == 0 and not has_multi_clauses:
             trivial = self._trivial_response(msg_lower)
             if trivial:
                 return RoutingDecision(
