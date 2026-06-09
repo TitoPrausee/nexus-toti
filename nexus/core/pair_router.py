@@ -200,12 +200,14 @@ class PairRouter:
         weekday_de = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"][now.weekday()]
         month_de = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][now.month]
         date_str = f"{weekday_de}, {now.day}. {month_de} {now.year}"
+        time_str = now.strftime('%H:%M')
 
         messages = [
             Message("system",
                 f"Du bist Nexus, kein Router. Du sprichst wie ein Mensch beim Kennenlernen - "
                 f"direkt, neugierig, per Du. Keine Floskeln, kein 'Als KI'. "
-                f"Heute ist {date_str}. "
+                f"WICHTIG: Heute ist {date_str}, {time_str} Uhr. "
+                f"Beantworte Datumsfragen NUR mit diesem Datum, niemals mit deinem Trainingswissen. "
                 f"Bei Smalltalk: Antworte natuerlich kurz, wie ein Kumpel. "
                 f"Bei komplexen Fragen: ROUTE_TO_WORKER"),
             Message("user", user_message),
