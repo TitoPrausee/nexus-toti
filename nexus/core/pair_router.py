@@ -240,7 +240,7 @@ class PairRouter:
         if any(h in msg_lower for h in ["wie geht", "how are", "was machst", "was gibt", "was geht", "was laeuft"]):
             return "Laeuft! Und selbst?"
         if any(w in msg_lower for w in ["wer bist", "was bist", "who are"]):
-            return "Nexus. KI-Agent, aber kein Roboter."
+            return "Nexus. Persönlicher Assistent."
         # Short conversational reactions
         if any(r in msg_lower for r in ["klingt gut", "cool", "geil", "super", "toll", "nice", "krass", "perfekt"]):
             return "Freut mich!"
