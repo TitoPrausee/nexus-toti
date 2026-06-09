@@ -209,9 +209,14 @@ class NexusTelegramBot:
         # ─── Normal processing ───────────────────────
         self._processing[user.id] = True
 
+        # Feedback emitter — sync callback that sends step updates via Telegram
+        # (async callback was causing "coroutine was never awaited" warnings)
+        loop = asyncio.get_event_loop()
         emitter = FeedbackEmitter(
-            callback=lambda msg, chat_id=chat_id, ctx=ctx: asyncio.ensure_future(
-                self._send_step_feedback(chat_id, ctx, msg)
+            callback=lambda event, chat_id=chat_id, ctx=ctx, loop=loop: (
+                asyncio.run_coroutine_threadsafe(
+                    self._send_step_feedback(chat_id, ctx, event), loop
+                ) if loop.is_running() else None
             )
         )
         self._feedback_emitters[user.id] = emitter
