@@ -149,9 +149,13 @@ class PairRouter:
                 max_worker_tokens=self.worker_max_tokens,
             )
 
-        question_words = {"wie", "warum", "wieso", "was", "wobei", "welche", "how", "why", "what", "which"}
+        question_words = {"wie", "warum", "wieso", "was", "wobei", "welche", "wer", "wo", "wann", "womit", "how", "why", "what", "which", "who", "where", "when"}
         question_count = sum(1 for w in question_words if w in msg_lower)
-        if question_count >= 2:
+        has_question_mark = "?" in user_message
+        # Check trivial patterns FIRST for known smalltalk (e.g. "was geht", "wie geht")
+        trivial = self._trivial_response(msg_lower)
+        # Any real question (not matched trivial) needs Worker
+        if (question_count >= 1 or has_question_mark) and not trivial:
             return RoutingDecision(
                 intent=IntentType.COMPLEX,
                 confidence=0.75,
