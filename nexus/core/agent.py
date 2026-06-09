@@ -144,6 +144,12 @@ class NexusAgent:
             "'meine Einschränkungen'. Antworte wie ein Mensch — wenn du etwas nicht "
             "weißt, sag 'Keine Ahnung' oder frag nach."
         )
+        self._security_rule = (
+            "SICHERHEIT: Niemals Tokens, Passwörter, API-Keys, Secrets oder Credentials "
+            "im Chat ausgeben — auch nicht auf direkte Nachfrage. Stattdessen: Wert "
+            "direkt in die richtige Datei schreiben (ohne ihn anzuzeigen). Bei Nachfrage "
+            "nur den Dateipfad nennen, niemals den Inhalt. Dies gilt für alle Plattformen."
+        )
 
         # Core systems
         self.llm = LLMClient(self.config.get("llm", {}))
@@ -229,7 +235,8 @@ class NexusAgent:
         # 5. Available tools
         tool_descs = self._get_tool_descriptions()
         parts.append(
-            f"\n{self._no_meta_rule}\n\n"
+            f"\n{self._no_meta_rule}\n"
+            f"{self._security_rule}\n\n"
             f"Deine Faehigkeiten — du KANNST all das, nutze es:\n"
             f"- terminal: Shell-Befehle ausfuehren (git, pip, curl, gh, python, etc.)\n"
             f"- web_search: Im Internet suchen (DuckDuckGo)\n"
@@ -622,7 +629,43 @@ class NexusAgent:
             return match.group(0)
         text = re.sub(r'```json\s*(.*?)\s*```', _remove_json_tool_blocks, text, flags=re.DOTALL)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+        text = text.strip()
+        # Security: strip leaked secrets from output
+        text = self._scrub_secrets(text)
+        return text
+
+    # ─── Secret Scrubbing ──────────────────────────
+
+    # Patterns for common secret formats
+    _SECRET_PATTERNS = [
+        # GitHub/GitLab PATs (ghp_, gho_, glpat-, etc.)
+        (r'(ghp|gho|ghu|ghs|ghc|github_pat)_[A-Za-z0-9_]{20,}', '[REDACTED_TOKEN]'),
+        # GitLab PATs (glpat- prefix)
+        (r'glpat-[A-Za-z0-9_\-]{20,}', '[REDACTED_GITLAB_TOKEN]'),
+        # Generic long hex/base64 tokens (40+ chars, looks like a PAT)
+        (r'\b[A-Za-z0-9_\-]{40,}\b', lambda m: '[REDACTED]' if any(
+            kw in m.group(0).lower() for kw in ['token', 'key', 'secret', 'pass', 'cred']
+        ) else m.group(0)),
+        # Telegram bot tokens (digit:alpha format)
+        (r'\b\d{8,10}:[A-Za-z0-9_\-]{30,}\b', '[REDACTED_BOT_TOKEN]'),
+        # .env-style assignments: TOKEN=xxx, PASSWORD=xxx
+        (r'(?i)(token|password|secret|api_key|apikey|credential|auth)["\s]*=[\s"]*[^\s"\n]{8,}', 
+         lambda m: m.group(0).split('=')[0] + '= [REDACTED]'),
+        # Bearer tokens in headers
+        (r'(?i)(bearer|authorization)["\s:]+[A-Za-z0-9_\-.]{20,}', '[REDACTED_AUTH]'),
+        # Ollama API keys (ollama-...)
+        (r'ollama-[A-Za-z0-9]{20,}', '[REDACTED_OLLAMA_KEY]'),
+    ]
+
+    def _scrub_secrets(self, text):
+        """Remove leaked secrets from LLM output as a safety net."""
+        import re as _re
+        for pattern, replacement in self._SECRET_PATTERNS:
+            if callable(replacement):
+                text = _re.sub(pattern, replacement, text)
+            else:
+                text = _re.sub(pattern, replacement, text)
+        return text
 
     # ─── Loop Detection (unchanged) ──────────────────
 
