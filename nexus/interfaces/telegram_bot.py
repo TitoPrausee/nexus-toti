@@ -27,7 +27,7 @@ from nexus.core.session_manager import SessionManager
 from nexus.core.rate_limiter import RateLimiter
 from nexus.core.feedback import FeedbackEmitter, FeedbackType, FeedbackEvent
 from nexus.core.personalization import PersonalizationEngine
-from nexus.interfaces.markdown_utils import escape_markdown_v2
+from nexus.interfaces.markdown_utils import escape_markdown_v2, format_markdown_v2, split_markdown_v2
 
 log = logging.getLogger("nexus.telegram")
 
@@ -427,27 +427,65 @@ class NexusTelegramBot:
                 await asyncio.sleep(5)
 
     def _format_response(self, text):
-        """Format bot response with rich Telegram formatting."""
+        """Format bot response for Telegram with rich structure.
+
+        Transforms plain LLM output into well-structured Telegram messages:
+        - Headers (lines ending with ':') → bold
+        - Bullet lists → proper - with bold key terms
+        - Numbered lists → bold numbers
+        - Code blocks preserved
+        - Dividers → unicode line
+        - Short links → inline
+        """
         lines = text.split("\n")
         formatted = []
 
         for line in lines:
             stripped = line.strip()
 
-            if stripped.startswith("```") or stripped.startswith("`"):
+            # Preserve code blocks as-is
+            if stripped.startswith("```") or (stripped.startswith("`") and not stripped.startswith("- ")):
                 formatted.append(line)
                 continue
 
-            if re.match(r'^(\d+\.)\s', stripped):
-                formatted.append(re.sub(r'^(\d+\.)\s', r'*\1* ', stripped))
-                continue
-
-            if stripped.startswith("- **"):
-                formatted.append(line)
-                continue
-
+            # Dividers
             if re.match(r'^[=\-]{3,}$', stripped):
-                formatted.append("─" * 20)
+                formatted.append("─" * 25)
+                continue
+
+            # Headers: lines like "Section:" or ending with ":" (not inside a sentence)
+            if stripped.endswith(":") and len(stripped) < 80 and not stripped.startswith("-") and not stripped.startswith("•"):
+                # Bold the header
+                formatted.append(f"**{stripped.rstrip(':')}**")
+                continue
+
+            # Numbered lists: "1. Something" → bold number
+            num_match = re.match(r'^(\d+\.)\s+(.*)', stripped)
+            if num_match:
+                num = num_match.group(1)
+                rest = num_match.group(2)
+                # Bold key term if present (before "–" or "—")
+                formatted.append(f"**{num}** {rest}")
+                continue
+
+            # Bullet lists: "- item" or "• item"
+            bullet_match = re.match(r'^[-•]\s+(.*)', stripped)
+            if bullet_match:
+                item = bullet_match.group(1)
+                # Bold key term if "key – value" or "key: value" or "key — value"
+                # Pattern: first phrase before separator
+                bold_match = re.match(r'^(.+?)\s*[–—:]\s*(.*)', item)
+                if bold_match:
+                    key = bold_match.group(1)
+                    value = bold_match.group(2)
+                    formatted.append(f"  • **{key}** — {value}")
+                else:
+                    # Check if first word should be bolded (technical term, model name)
+                    word_match = re.match(r'^([A-Z][\w\-.]+\s*[\w\-.]*)\s+(.*)', item)
+                    if word_match and len(item) > 15:
+                        formatted.append(f"  • **{word_match.group(1)}** {word_match.group(2)}")
+                    else:
+                        formatted.append(f"  • {item}")
                 continue
 
             formatted.append(line)
@@ -455,14 +493,16 @@ class NexusTelegramBot:
         return "\n".join(formatted)
 
     async def _send_response(self, chat_id, ctx, text):
-        """Send formatted response, splitting into chunks if needed."""
+        """Send formatted response using MarkdownV2 with proper escaping."""
         MAX_LEN = 4096
 
+        # First, apply structural formatting
         formatted = self._format_response(text)
 
+        # Then convert to MarkdownV2 with proper escaping
         try:
-            escaped = escape_markdown_v2(formatted)
-            chunks = self._split_text(escaped, MAX_LEN)
+            md2 = format_markdown_v2(formatted)
+            chunks = split_markdown_v2(md2, MAX_LEN)
             for i, chunk in enumerate(chunks):
                 await ctx.bot.send_message(
                     chat_id=chat_id,
@@ -471,7 +511,9 @@ class NexusTelegramBot:
                 )
                 if i < len(chunks) - 1:
                     await asyncio.sleep(0.5)
-        except Exception:
+        except Exception as e:
+            log.warning(f"MarkdownV2 formatting failed, falling back to plain: {e}")
+            # Fallback: plain text, no formatting
             chunks = self._split_text(text, MAX_LEN)
             for chunk in chunks:
                 await ctx.bot.send_message(
