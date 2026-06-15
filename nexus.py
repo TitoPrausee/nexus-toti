@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NEXUS v7 — Main Entry Point
-One agent. Soul-driven. Tool-empowered. Stream-fast.
+NEXUS v9 — Main Entry Point
+Soul-driven AI Agent mit 6-Agent Team. Cloud-only. Think-Act-Delegate.
 Hot-reload: config changes are picked up automatically.
 
 Usage:
@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-__version__ = "8.0"
+__version__ = "9.0"
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

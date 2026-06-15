@@ -1,4 +1,4 @@
-# NEXUS v7 — Dependencies
+# NEXUS v9 — Dependencies
 # Lean, clean, no bloat
 
 # Core

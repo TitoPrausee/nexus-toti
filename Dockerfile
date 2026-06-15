@@ -1,4 +1,4 @@
-# ─── NEXUS v7 — Multi-Stage Dockerfile ──────────────────────────
+# ─── NEXUS v9 — Multi-Stage Dockerfile ──────────────────────────
 # Stage 1: Builder — install deps in a full image
 # Stage 2: Runtime — minimal slim image, non-root user
 
@@ -19,9 +19,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ── Runtime ──────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
-LABEL org.opencontainers.image.title="NEXUS v7"
-LABEL org.opencontainers.image.description="Autonomer KI-Agent mit Seele — Soul-driven AI Agent"
-LABEL org.opencontainers.image.version="7.0"
+LABEL org.opencontainers.image.title="NEXUS v9"
+LABEL org.opencontainers.image.description="Autonomer KI-Agent mit Seele und Team — 6-Agent Soul-driven AI"
+LABEL org.opencontainers.image.version="9.0"
 LABEL org.opencontainers.image.source="https://github.com/***REMOVED***/nexus-toti"
 
 # Security: create non-root user

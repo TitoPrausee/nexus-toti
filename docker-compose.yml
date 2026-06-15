@@ -1,4 +1,4 @@
-# NEXUS v7 — Docker Compose
+# NEXUS v9 — Docker Compose
 # docker compose up nexus            → CLI mode
 # docker compose up nexus-telegram    → Telegram bot mode
 # docker compose up nexus-web         → Web UI mode
@@ -7,7 +7,7 @@
 services:
   nexus:
     build: .
-    image: nexus-toti:v7
+    image: nexus-toti:v9
     container_name: nexus-toti
     stdin_open: true
     tty: true
@@ -46,7 +46,7 @@ services:
 
   nexus-telegram:
     build: .
-    image: nexus-toti:v7
+    image: nexus-toti:v9
     container_name: nexus-toti-telegram
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
@@ -84,7 +84,7 @@ services:
 
   nexus-contributor-bot:
     build: .
-    image: nexus-toti:v7
+    image: nexus-toti:v9
     container_name: nexus-contributor-bot
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
@@ -120,7 +120,7 @@ services:
 
   nexus-web:
     build: .
-    image: nexus-toti:v7
+    image: nexus-toti:v9
     container_name: nexus-web
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
