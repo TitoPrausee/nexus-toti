@@ -1,5 +1,5 @@
 """
-NEXUS v8.2 — DSGVO/GDPR Compliance Module
+NEXUS v9 — DSGVO/GDPR Compliance Module
 Implements EU GDPR requirements: consent, data access, right to erasure,
 data minimization, storage limitation, and privacy logging.
 
@@ -466,13 +466,13 @@ class DSGVOCompliance:
     def get_privacy_notice(self) -> str:
         """Get the DSGVO privacy notice text shown at /start."""
         return (
-            "🔒 **Datenschutzerklärung — Nexus Bot**\n"
+            "🔒 *Datenschutzerklärung — Nexus Bot*\n"
             "\n"
             "Ich speichere folgende Daten von dir:\n"
             "\n"
-            "• **Gespräche** — aktuelle u\\. letzte Konversationen\n"
-            "• **Gelerntes** — Fakten u\\. Präferenzen, die du mir nennst\n"
-            "• **Profil** — Name, Kommunikationsstil, Interessen\n"
+            "• *Gespräche* — aktuelle u\\. letzte Konversationen\n"
+            "• *Gelerntes* — Fakten u\\. Präferenzen, die du mir nennst\n"
+            "• *Profil* — Name, Kommunikationsstil, Interessen\n"
             "\n"
             "Deine Rechte \\(DSGVO\\):\n"
             "• `/data` — Einsehen was gespeichert ist \\(Art\\. 15\\)\n"
@@ -480,7 +480,15 @@ class DSGVOCompliance:
             "• `/consent` — Einwilligung widerrufen\n"
             "\n"
             f"Aufbewahrung: max\\. {DATA_RETENTION_DAYS} Tage Inaktivität\\.\n"
-            f"Version: {PRIVACY_POLICY_VERSION}\n"
+            f"Version: {self._escape_md2(str(PRIVACY_POLICY_VERSION))}\n"
             "\n"
             "Mit `/start` akzeptierst du diese Richtlinie\\."
         )
+
+    @staticmethod
+    def _escape_md2(text: str) -> str:
+        """Escape Telegram MarkdownV2 special characters."""
+        special = "_*[]()~`>#+-=|{}.!"
+        for ch in special:
+            text = text.replace(ch, f"\\{ch}")
+        return text

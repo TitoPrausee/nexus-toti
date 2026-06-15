@@ -146,13 +146,19 @@ class NexusTelegramBot:
         # DSGVO: Consent gate
         if self.dsgvo.needs_consent(uid):
             notice = self.dsgvo.get_privacy_notice()
-            await update.message.reply_text(notice, parse_mode=ParseMode.MARKDOWN_V2)
+            try:
+                await update.message.reply_text(notice, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(notice)
             # Auto-give consent on /start (user explicitly started the bot)
             self.dsgvo.give_consent(uid)
-            await update.message.reply_text(
-                "✅ Einwilligung erteilt\\. Schreib mir einfach\\!",
-                parse_mode=ParseMode.MARKDOWN_V2,
-            )
+            try:
+                await update.message.reply_text(
+                    "✅ Einwilligung erteilt\\. Schreib mir einfach\\!",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            except Exception:
+                await update.message.reply_text("✅ Einwilligung erteilt. Schreib mir einfach!")
             return
 
         greeting = self.agent.personalization.generate_greeting(uid)
