@@ -1,35 +1,35 @@
 # NEXUS v7 — Configuration
-# Lean, fast, soul-driven. No bloat, no z-ai, no gimmicks.
+# Lean, fast, soul-driven. Cloud-only, no local fallback.
 
 # ─── IDENTITY ───────────────────────────────────────────
 nexus:
   name: "Toti"
-  version: "7.0"
+  version: "8.2"
   language: "de"  # Primary language
 
 # ─── LLM ROUTING ────────────────────────────────────────
 llm:
-  # Ollama Cloud — our real models
-  base_url: "http://localhost:11434"  # Local Ollama (cloud models via ollama.com proxy)
-  local_url: "http://localhost:11434"
+  # Ollama Cloud Merge Proxy — round-robin across 2 accounts, no local fallback
+  base_url: "http://host.docker.internal:11435"  # Merge Proxy (Cloud-only)
+  local_url: "http://host.docker.internal:11435"  # Same proxy — cloud-only setup
   api_key_env: "OLLAMA_API_KEY"
-  mode: "cloud"  # cloud | local | hybrid
+  mode: "cloud"  # cloud ONLY — no local fallback
 
-  # Single smart agent — Toti decides when to delegate
-  default_model: "kimi-k2.6:cloud"
+  # Primary model — fast, smart, German-capable
+  default_model: "glm-5.1:cloud"
   default_temperature: 0.7
   default_max_tokens: 4096
 
-  # Specialist models — used ONLY when delegated
+  # Specialist models — used ONLY when delegated by Pair Router
   models:
     coding: "qwen3-coder-next:cloud"
     research: "glm-5.1:cloud"
     analysis: "kimi-k2.6:cloud"
     creative: "gemma4:cloud"
-    fast: "gemini-3-flash-preview:cloud"
+    fast: "deepseek-v4-flash:cloud"
 
-  # Fallback chain
-  fallback: ["glm-5.1:cloud", "qwen2.5:3b"]  # cloud then local
+  # Fallback chain — cloud only, no local models
+  fallback: ["deepseek-v4-flash:cloud", "glm-5.1:cloud"]  # fast fallback, then universal
   max_retries: 2
   timeout: 120  # seconds
   stream: true  # always stream for fast responses

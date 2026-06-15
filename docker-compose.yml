@@ -12,7 +12,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
       - NEXUS_TG_USERS=${NEXUS_TG_USERS:-}
@@ -32,11 +32,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: "2.0"
+          memory: 4G
+          cpus: "4.0"
         reservations:
-          memory: 512M
-          cpus: "0.5"
+          memory: 1G
+          cpus: "1.0"
     logging:
       driver: json-file
       options:
@@ -49,7 +49,7 @@ services:
     image: nexus-toti:v7
     container_name: nexus-toti-telegram
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_TG_TOKEN=${NEXUS_TG_TOKEN:-}
       - NEXUS_TG_USERS=${NEXUS_TG_USERS:-}
@@ -69,11 +69,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: "2.0"
+          memory: 4G
+          cpus: "4.0"
         reservations:
-          memory: 512M
-          cpus: "0.5"
+          memory: 1G
+          cpus: "1.0"
     logging:
       driver: json-file
       options:
@@ -89,6 +89,7 @@ services:
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
       - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
       - NEXUS_LOG_FORMAT=${NEXUS_LOG_FORMAT:-text}
     extra_hosts:
@@ -104,11 +105,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: "1.0"
+          memory: 2G
+          cpus: "2.0"
         reservations:
-          memory: 256M
-          cpus: "0.25"
+          memory: 512M
+          cpus: "0.5"
     logging:
       driver: json-file
       options:
@@ -122,7 +123,7 @@ services:
     image: nexus-toti:v7
     container_name: nexus-web
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11435}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEXUS_WEB_PORT=3000
       - NEXUS_LOG_LEVEL=${NEXUS_LOG_LEVEL:-INFO}
@@ -141,11 +142,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: "1.0"
+          memory: 2G
+          cpus: "2.0"
         reservations:
-          memory: 256M
-          cpus: "0.25"
+          memory: 512M
+          cpus: "0.5"
     logging:
       driver: json-file
       options:

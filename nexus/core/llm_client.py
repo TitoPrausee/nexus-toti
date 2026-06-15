@@ -62,7 +62,7 @@ DEFAULT_MODELS = {
     "creative": ModelConfig("gemma4:cloud", 0.8, 4096, "Creative"),
     "fast": ModelConfig("gemini-3-flash-preview:cloud", 0.5, 2048, "Fast/Cheap"),
     "fallback_cloud": ModelConfig("glm-5.1:cloud", 0.5, 4096, "Cloud Fallback"),
-    "fallback_local": ModelConfig("qwen2.5:3b", 0.5, 2048, "Local Emergency"),
+    "fallback_local": ModelConfig("deepseek-v4-flash:cloud", 0.3, 4096, "Cloud Fast Fallback"),
 }
 
 # Error categories for smarter retry decisions
@@ -103,8 +103,8 @@ class LLMClient:
 
     def __init__(self, config: dict = None):
         self.config = config or {}
-        self.base_url = self.config.get("base_url", os.environ.get("OLLAMA_HOST", "https://api.ollama.ai"))
-        self.local_url = self.config.get("local_url", "http://localhost:11434")
+        self.base_url = self.config.get("base_url", os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11435"))
+        self.local_url = self.config.get("local_url", os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11435"))
         self.api_key = self.config.get("api_key") or os.environ.get("OLLAMA_API_KEY", "")
         self.mode = self.config.get("mode", "cloud")  # cloud, local, hybrid
 

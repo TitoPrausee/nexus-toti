@@ -438,7 +438,17 @@ def main():
         run_test(config)
     elif args.telegram:
         from nexus.core.agent import NexusAgent
+        from nexus.core.heartbeat import HeartbeatSystem
+        from nexus.core.project_tracker import ProjectTracker
         agent = NexusAgent(config)
+
+        # Start autonomous heartbeat (health checks, memory cleanup)
+        heartbeat = HeartbeatSystem(agent, config)
+        heartbeat.start()
+
+        # Load project tracker for context injection
+        tracker = ProjectTracker(config.get("project_tracker", {}))
+        agent.project_tracker = tracker
 
         # Register hot-reload callback for LLM config changes
         def on_config_change(new_config: dict):
@@ -466,6 +476,7 @@ def main():
         except KeyboardInterrupt:
             bot.stop()
         finally:
+            heartbeat.stop()
             _config_manager.stop_watcher()
 
     elif args.web:
