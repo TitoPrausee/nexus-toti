@@ -1,8 +1,8 @@
-# NEXUS v7 — ROADMAP
+# NEXUS v9 — ROADMAP
 
-## Status: ALPHA — Circular Chain Detection v7.6 Complete
+## Status: PRODUCTION — Mercury-Level Architecture v9.0
 
-Letztes Update: 2026-06-06 (v7.6: Circular Chain Detection im Agent-Loop)
+Letztes Update: 2026-06-15 (v9.0: Mercury-Level Architecture Upgrade, Cloud-Only, 6-Agent Team)
 
 ---
 
