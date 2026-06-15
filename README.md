@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-7.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
+  <img src="https://img.shields.io/badge/version-9.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0a0a0a" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge&labelColor=0a0a0a" alt="License">
   <img src="https://img.shields.io/badge/status-production-orange?style=for-the-badge&labelColor=0a0a0a" alt="Status">
 </p>
 
-<h1 align="center">NEXUS v7</h1>
+<h1 align="center">NEXUS v9</h1>
 
 <p align="center">
   <strong>Autonomer KI-Agent mit Seele.</strong><br>
