@@ -142,7 +142,7 @@ def run_test(config: dict):
     from nexus.core.llm_client import LLMClient, Message
     from nexus.core.config import ConfigManager
 
-    print("=== NEXUS v7 Self-Test ===\n")
+    print("=== NEXUS v9 Self-Test ===\n")
 
     # 1. Config
     print(f"[OK] Config loaded: {list(config.keys())}")
@@ -267,7 +267,7 @@ def print_startup_banner(config: dict):
 
     banner = f"""
 ╔═══════════════════════════════════════════════════════╗
-║  NEXUS v{__version__} — Soul-Driven AI Agent              ║
+║  NEXUS v{__version__} — 6-Agent Soul-Driven AI                  ║
 ╠═══════════════════════════════════════════════════════╣
 ║  Name:     {nexus_cfg.get('name', 'Toti'):<42s}║
 ║  Language: {nexus_cfg.get('language', 'de'):<42s}║
@@ -379,7 +379,7 @@ def _register_signal_handlers(agent, config_mgr: ConfigManager):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NEXUS v7 — Autonomous AI Agent")
+    parser = argparse.ArgumentParser(description="NEXUS v9 — 6-Agent Soul-Driven AI")
     parser.add_argument("--telegram", action="store_true", help="Run as Telegram bot")
     parser.add_argument("--web", action="store_true", help="Run Web UI server (Tailscale)")
     parser.add_argument("--contributor-bot", action="store_true", help="Run Discord contributor onboarding bot")
