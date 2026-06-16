@@ -1,22 +1,35 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-9.1-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
+  <img src="https://img.shields.io/badge/version-9.2-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0a0a0a" alt="Python">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="License">
   <img src="https://img.shields.io/badge/status-production-brightgreen?style=for-the-badge&labelColor=0a0a0a" alt="Status">
 </p>
 
-<h1 align="center">NEXUS v9.1</h1>
+<h1 align="center">NEXUS v9.2</h1>
 
 <p align="center">
-  <strong>Autonomer KI-Agent mit Seele und 156 Skills.</strong><br>
-  6 spezialisierte Agenten, Pair Router, DSGVO-konform — denkt, delegiert und erinnert sich.
+  <strong>Autonomer KI-Agent mit Seele, 156 Skills und Multi-Agent-Delegation.</strong><br>
+  Erste Antwort < 4s · Parallele Agenten · Persistente Profile · Response Cache
 </p>
+
+---
+
+## 🆕 Was ist neu in v9.2
+
+| Feature | Beschreibung |
+|---|---|
+| **Fast Response Layer** | Template-Ack < 100ms + Hybrid fast-Model-Upgrade < 2s. Erste Antwort immer < 4s. |
+| **Response Cache** | Wiederkehrende Fragen werden gecacht — Instant-Antwort < 10ms, kein LLM-Call. |
+| **Parallele Agenten** | Komplexe Aufgaben auf N Agenten verteilt (ThreadPoolExecutor). Zwischenergebnis + finale Synthese. |
+| **Agent Profile** | Persistente YAML-Profile mit Performance-Tracking, Skill-Assignments und Auto-Evolution. |
+| **Complexity Routing** | Intent → simple/moderate/complex/critical → bestimmt Agent-Anzahl und Modell-Wahl. |
+| **`/agent` Command** | Neue Telegram-Commands: create, assign, stats, evolve — Agenten managen per Chat. |
 
 ---
 
 ## Diagramme
 
-### System-Architektur
+### System-Architektur (v9.2)
 
 ```mermaid
 graph TB
@@ -26,9 +39,14 @@ graph TB
         WEB[Web UI<br/>FastAPI · Invite-Gate]
     end
 
-    subgraph NexusAgent["NEXUS v9 — Agent Core"]
+    subgraph FastResponse["⚡ Fast Response Layer"]
+        RC[Response Cache<br/>Q&A Pairs · Fuzzy Match · <10ms]
+        QR[QuickResponder<br/>Template-Ack · Hybrid fast-Model]
+    end
+
+    subgraph NexusAgent["NEXUS v9.2 — Agent Core"]
         AG[Agent Core<br/>Think-Act Loop · Circular-Chain Detection]
-        PR[Pair Router<br/>6-Agent Delegation]
+        PR[Pair Router<br/>6-Agent Delegation · Complexity Routing]
         SOUL[SoulEngine<br/>Persönlichkeit · Beziehungen · DSGVO]
         MEM[MemorySystem<br/>L1 · L2 · L3 · L4 · Vector Search]
         TOOLS[ToolRegistry<br/>11 Werkzeuge]
@@ -38,13 +56,20 @@ graph TB
         SM[Session Manager<br/>Per-Chat Isolation · Timeout]
     end
 
-    subgraph AgentTeam["6-Agenten Team"]
-        N0["NEXUS-0 · Toti<br/>kimi-k2.6:cloud<br/>Orchestration"]
-        SC["SCOUT<br/>glm-5.1:cloud<br/>Recherche"]
-        FG["FORGE<br/>qwen3-coder-next:cloud<br/>Coding"]
-        LS["LENS<br/>kimi-k2.6:cloud<br/>Analyse"]
-        HD["HERALD<br/>minimax-m2.7:cloud<br/>Output"]
-        GH["GHOST<br/>deepseek-v4-flash:cloud<br/>Background"]
+    subgraph AgentTeam["5-Department Team + Parallel"]
+        CEO["CEO<br/>glm-5.1:cloud<br/>Priorisierung · Synthese"]
+        SC["Research<br/>glm-5.1:cloud<br/>Recherche · Analyse"]
+        FG["Engineering<br/>qwen3-coder-next:cloud<br/>Code · Build · Deploy"]
+        HD["Creative<br/>gemma4:cloud<br/>Design · Text · UI"]
+        OPS["Operations<br/>deepseek-v4-flash:cloud<br/>Schnell · Effizient"]
+    end
+
+    subgraph AgentProfiles["📊 Persistente Profile"]
+        Y1[ceo.yaml]
+        Y2[research.yaml]
+        Y3[engineering.yaml]
+        Y4[creative.yaml]
+        Y5[operations.yaml]
     end
 
     subgraph Tools
@@ -60,6 +85,7 @@ graph TB
         RJ[relations.json]
         LJ[longterm.json]
         SJ[session.json]
+        CACHE[response_cache.json]
         DSGVO[dsgvo_config.yaml]
     end
 
@@ -68,6 +94,8 @@ graph TB
     WEB --> SM
     SM --> AG
 
+    AG --> RC
+    AG --> QR
     AG --> PR
     AG --> SOUL
     AG --> MEM
@@ -76,12 +104,17 @@ graph TB
     AG --> HB
     AG --> PT
 
-    PR --> N0
+    PR --> CEO
     PR --> SC
     PR --> FG
-    PR --> LS
     PR --> HD
-    PR --> GH
+    PR --> OPS
+
+    CEO --> Y1
+    SC --> Y2
+    FG --> Y3
+    HD --> Y4
+    OPS --> Y5
 
     TOOLS --> T1
     TOOLS --> T2
@@ -94,9 +127,12 @@ graph TB
     SOUL --> DSGVO
     MEM --> SJ
     MEM --> LJ
+    AG --> CACHE
 
     style AG fill:#1a1a2e,stroke:#e94560,color:#fff
     style PR fill:#2a1a3e,stroke:#e94560,color:#fff
+    style QR fill:#0a2a0a,stroke:#4CAF50,color:#fff
+    style RC fill:#0a2a0a,stroke:#4CAF50,color:#fff
     style SOUL fill:#16213e,stroke:#0f3460,color:#fff
     style MEM fill:#16213e,stroke:#0f3460,color:#fff
     style TOOLS fill:#16213e,stroke:#0f3460,color:#fff
@@ -104,60 +140,130 @@ graph TB
     style HB fill:#1a2e1a,stroke:#4CAF50,color:#fff
     style PT fill:#1a2e1a,stroke:#4CAF50,color:#fff
     style SM fill:#2e1a1a,stroke:#FF9800,color:#fff
-    style N0 fill:#1a1a2e,stroke:#e94560,color:#fff
+    style CEO fill:#1a1a2e,stroke:#e94560,color:#fff
     style SC fill:#16213e,stroke:#533483,color:#fff
     style FG fill:#0f3460,stroke:#533483,color:#fff
-    style LS fill:#16213e,stroke:#533483,color:#fff
-    style HD fill:#0f3460,stroke:#533483,color:#fff
-    style GH fill:#2a0a0a,stroke:#e94560,color:#fff
+    style HD fill:#2a1a3e,stroke:#e94560,color:#fff
+    style OPS fill:#1a2e1a,stroke:#4CAF50,color:#fff
+    style CACHE fill:#0a2a0a,stroke:#4CAF50,color:#4CAF50
 ```
 
-### Think-Act Loop (v9)
+### Request-Flow (v9.2) — Erste Antwort < 4s
+
+```mermaid
+sequenceDiagram
+    participant U as Nutzer
+    participant TG as Telegram
+    participant RC as Response Cache
+    participant QR as QuickResponder
+    participant PR as Pair Router
+    participant AG as NexusAgent
+    participant TEAM as Agent Team
+    participant LLM as LLMClient
+
+    U->>TG: Nachricht
+    TG->>AG: process(message)
+
+    alt Cache Hit (wiederkehrende Frage)
+        AG->>RC: lookup(message)
+        RC-->>AG: CacheEntry (Hits ≥ 2)
+        AG-->>TG: Instant-Antwort (< 10ms)
+        TG-->>U: ✅ Antwort
+    else Neue Frage
+        AG->>RC: lookup(message) → MISS
+        AG->>QR: generate_ack(message, routing)
+        QR-->>AG: Template-Ack (< 100ms)
+        AG-->>TG: "🧠 Analysiere..." (sofort)
+        Note over QR,AG: Parallel: fast-Model generiert besseren Ack
+
+        AG->>PR: classify_intent(message)
+        PR-->>AG: Intent + Complexity
+
+        alt Trivial (simple)
+            PR-->>AG: Direkte Antwort
+            AG->>RC: store(message, answer)
+            AG-->>TG: Antwort
+        else Complex (moderate/complex/critical)
+            AG->>TEAM: delegate_parallel(task, complexity)
+
+            alt Parallel (2-4 Agenten)
+                TEAM->>LLM: Agent 1 (Research)
+                TEAM->>LLM: Agent 2 (Engineering)
+                TEAM->>LLM: Agent 3 (Creative)
+                LLM-->>TEAM: Erster Agent fertig
+                TEAM-->>TG: Zwischenergebnis
+                LLM-->>TEAM: Alle Agenten fertig
+                TEAM->>TEAM: CEO synthetisiert
+            else Single Agent
+                TEAM->>LLM: Spezialist-Antwort
+            end
+
+            AG->>RC: store(message, final_answer)
+            AG-->>TG: Finale Antwort
+        end
+        TG-->>U: ✅ Antwort
+    end
+```
+
+### Think-Act Loop (v9.2)
 
 ```mermaid
 sequenceDiagram
     participant U as Nutzer
     participant I as Interface<br/>(Telegram/CLI/Web)
+    participant RC as Response Cache
     participant SM as Session Manager
     participant A as NexusAgent
     participant PR as Pair Router
+    participant QR as QuickResponder
     participant M as Memory
     participant S as Soul + DSGVO
     participant L as LLMClient
     participant T as Tools
+    participant TEAM as Agent Team
     participant HB as Heartbeat
 
     U->>I: Nachricht
     I->>SM: get_or_create_session(chat_id)
-    SM->>A: process(message, user_id)
-    A->>HB: heartbeat_pulse()
-    A->>M: add(user, message)
-    A->>S: get_system_prompt() + get_user_context() + dsgvo_check()
-    A->>M: get_context(max_tokens) + vector_search()
-    A->>L: chat(messages)
+    SM->>A: process(message, user_id, quick_callback)
 
-    alt LLM gibt Tool-Call
-        L-->>A: Response mit <tool>...</tool>
-        A->>A: parse_tool_calls() + circular_chain_check()
-        loop Für jeden Tool-Call
-            A->>T: execute(tool, **args)
-            T-->>A: ToolResult
-            A->>HB: heartbeat_pulse()
-            A->>L: chat(messages + result)
+    A->>RC: lookup(message)
+    alt Cache Hit
+        RC-->>A: Cached Answer
+        A-->>I: Instant response (< 10ms)
+    else Cache Miss
+        A->>QR: generate_ack(message, routing)
+        QR-->>I: Template-Ack (sofort)
+        A->>HB: heartbeat_pulse()
+        A->>M: add(user, message)
+        A->>S: get_system_prompt() + get_user_context()
+        A->>M: get_context(max_tokens) + vector_search()
+        A->>PR: route(message, context)
+        PR-->>A: Intent + Complexity
+
+        alt LLM gibt Tool-Call
+            L-->>A: Response mit <tool>...</tool>
+            A->>A: parse_tool_calls() + circular_chain_check()
+            loop Für jeden Tool-Call
+                A->>T: execute(tool, **args)
+                T-->>A: ToolResult
+                A->>HB: heartbeat_pulse()
+                A->>L: chat(messages + result)
+            end
+            L-->>A: Finale Text-Antwort
+        else LLM delegiert an Team
+            A->>TEAM: delegate_parallel(task, complexity)
+            TEAM-->>A: Synthetisierte Antwort
+        else LLM gibt direkte Antwort
+            L-->>A: Text-Antwort
         end
-        L-->>A: Finale Text-Antwort
-    else LLM delegiert an Spezialisten
-        L-->>A: Response mit delegation
-        A->>PR: route(agent, task)
-        PR-->>A: Spezialist-Antwort
-    else LLM gibt direkte Antwort
-        L-->>A: Text-Antwort
-    end
 
-    A->>S: scrub_secrets(response)
-    A->>M: add(assistant, response)
-    A->>S: update_user(user_id, trust_delta=+0.01)
-    A-->>I: response (MarkdownV2 formatted)
+        A->>S: scrub_secrets(response)
+        A->>M: add(assistant, response)
+        A->>RC: store(message, response, importance)
+        A->>S: update_user(user_id, trust_delta=+0.01)
+        A-->>I: response (MarkdownV2 formatted)
+    end
     I-->>U: Nachricht
 ```
 
@@ -224,6 +330,48 @@ flowchart TD
     style PAIR fill:#2a1a3e,stroke:#e94560,color:#fff
 ```
 
+### Agent Profile & Evolution
+
+```mermaid
+graph LR
+    subgraph Task["Aufgabe"]
+        T1[User Message] --> PR[Pair Router]
+    end
+
+    PR -->|simple| OPS_OPS[Operations<br/>1 Agent, fast]
+    PR -->|moderate| MOD_TEAM[Research +<br/>Engineering<br/>2 Agenten]
+    PR -->|complex| COMPLEX_TEAM[Research + Engineering<br/>+ Creative<br/>3 Agenten parallel]
+    PR -->|critical| CRIT_TEAM[CEO + Research +<br/>Engineering + Operations<br/>4 Agenten + Synthese]
+
+    subgraph Profiles["Persistente Profile (YAML)"]
+        P1[ceo.yaml<br/>Tasks: N ✅ Rate: X%<br/>Ø Zeit: Ys]
+        P2[research.yaml<br/>Skills: arxiv, blogwatcher<br/>Evolution: N Insights]
+        P3[engineering.yaml<br/>Skills: terminal, code_exec<br/>Performance Tracking]
+        P4[creative.yaml<br/>Auto-Evolution<br/>alle 10 Tasks]
+        P5[operations.yaml<br/>Fast Model<br/>Quick Responses]
+    end
+
+    COMPLEX_TEAM --> SYN[CEO Synthese]
+    CRIT_TEAM --> SYN
+
+    subgraph Evolution["Auto-Evolution"]
+        EV1[Performance Track<br/>Erfolg ✅ / Fehler ❌]
+        EV2[Pattern Detection<br/>Niedrige Rate → Prompt-Verbesserung]
+        EV3[LLM-Evolution<br/>/agent evolve → Prompt-Vorschläge]
+    end
+
+    Profiles -.->|nach 10 Tasks| Evolution
+    Evolution -.->|neue Insights| Profiles
+
+    style PR fill:#2a1a3e,stroke:#e94560,color:#fff
+    style OPS_OPS fill:#1a2e1a,stroke:#4CAF50,color:#fff
+    style MOD_TEAM fill:#16213e,stroke:#533483,color:#fff
+    style COMPLEX_TEAM fill:#0f3460,stroke:#e94560,color:#fff
+    style CRIT_TEAM fill:#1a1a2e,stroke:#e94560,color:#fff
+    style SYN fill:#2a0a0a,stroke:#FF9800,color:#fff
+    style Evolution fill:#0a2a0a,stroke:#4CAF50,color:#fff
+```
+
 ### Soul-Komponenten
 
 ```mermaid
@@ -272,11 +420,30 @@ classDiagram
         +end_session()
     }
 
-    class SessionManager {
-        +sessions: dict
-        +get_or_create(chat_id) Agent
-        +cleanup_idle() int
-        +save_all()
+    class ResponseCache {
+        +entries: list
+        +lookup(question) CacheEntry
+        +store(question, answer, importance) bool
+        +add_manual(question, answer) bool
+        +search(query, limit) list
+        +stats() dict
+    }
+
+    class QuickResponder {
+        +llm: LLMClient
+        +generate_ack(message, routing) AckResult
+        +generate_progress_ack(completed, total) str
+        +generate_delegation_ack(dept, task) str
+    }
+
+    class AgentProfile {
+        +name: str
+        +role: str
+        +model: str
+        +system_prompt: str
+        +skills: list
+        +performance: PerformanceMetrics
+        +evolution: list
     }
 
     class NexusAgent {
@@ -285,20 +452,22 @@ classDiagram
         +soul: SoulEngine
         +tools: ToolRegistry
         +pair_router: PairRouter
-        +heartbeat: Heartbeat
-        +project_tracker: ProjectTracker
-        +session_manager: SessionManager
-        +process(message, user_id) str
-        +process_stream(message, user_id) AsyncIterator
+        +quick_responder: QuickResponder
+        +response_cache: ResponseCache
+        +team: AgentTeam
+        +process(message, user_id, quick_callback) str
         +shutdown()
     }
 
     NexusAgent --> SoulEngine : uses
     NexusAgent --> MemorySystem : uses
     NexusAgent --> PairRouter : delegates
-    NexusAgent --> SessionManager : manages
+    NexusAgent --> ResponseCache : caches
+    NexusAgent --> QuickResponder : fast ack
+    NexusAgent --> AgentTeam : parallel delegation
     SoulEngine --> UserRelation : manages
     SoulEngine --> DSGVOCompliance : enforces
+    AgentTeam --> AgentProfile : loads profiles
 ```
 
 ## Architektur
@@ -310,10 +479,11 @@ requirements.txt            Python-Dependencies
 
 nexus/
   core/
-    agent.py                NexusAgent ─ Orchestrator, Think-Act Loop, Circular-Chain Detection
-    agent_team.py            6-Agenten Team ─ Scout, Forge, Lens, Herald, Ghost
+    agent.py                NexusAgent ─ Orchestrator, Think-Act Loop, Cache, QuickResponder
+    agent_team.py            5-Department Team ─ Parallel Delegation, Complexity Classification
+    agent_profiles.py        Persistente Profile ─ YAML, Performance, Auto-Evolution
     llm_client.py           Ollama Cloud Client ─ Streaming · Fallback-Chain · Merge Proxy
-    pair_router.py           Pair Router ─ intelligente Delegation an Spezialisten
+    pair_router.py           Pair Router ─ Intent + Complexity Classification
     memory.py               L1→L2→L3→L4 Memory ─ Working → Session → Long-Term → Soul
     tools.py                ToolRegistry ─ 11 produktive Werkzeuge, null Stubs
     config.py               ConfigManager ─ Hot-Reload · mtime-Watcher · SIGHUP
@@ -327,9 +497,11 @@ nexus/
     feedback.py              Feedback Loop ─ Self-Improvement · Response Quality
     personalization.py       Adaptive Personalisierung ─ Mood · Style · Preferences
     skill_autocreator.py     Skill-Auto-Erstellung ─ Pattern Detection · Template
+    fast_response.py          ⚡ QuickResponder ─ Template-Ack · Hybrid fast-Model (< 4s)
+    response_cache.py         ⚡ Response Cache ─ Q&A Pairs · Fuzzy Match · < 10ms
     dsgvo.py                DSGVO Compliance ─ Data Handling · Privacy · Anonymization
   interfaces/
-    telegram_bot.py         Telegram Interface ─ MarkdownV2 · Streaming · Rate-Limit · Auth
+    telegram_bot.py         Telegram Interface ─ MarkdownV2 · Streaming · /agent Command
     markdown_utils.py       MarkdownV2 Formatter ─ Escaping · Splitting · Conversion
     cli.py                  CLI Interface ─ interaktiver Test-Modus
     web_ui.py               Web UI ─ FastAPI · Chat · Invite-Gate · Rate-Limit
@@ -337,6 +509,15 @@ nexus/
     __init__.py             SoulEngine ─ persistente Identität, Beziehungen, Eigenheiten, DSGVO
     soul.yaml               Persönlichkeits-Definition (Werte, Regeln, Stil, Security)
   memory/                   Runtime-Daten (gitignored · persistent via Docker Volume)
+
+data/
+  agents/                   ⚡ Persistente Agent-Profile (YAML)
+    ceo.yaml                CEO ─ Orchestrierung, Synthese
+    research.yaml           Research ─ Recherche, Analyse
+    engineering.yaml        Engineering ─ Code, Build, Deploy
+    creative.yaml           Creative ─ Design, Text, UI
+    operations.yaml        Operations ─ Schnell, Effizient
+  skills/                   156 Skills in 22 Kategorien
 ```
 
 ## Quick Start
@@ -382,32 +563,66 @@ Toti besitzt eine **Seele** — persistent, adaptiv, einzigartig:
 
 | Schicht | Funktion | Persistenz |
 |---|---|---|
-| **Persönlichkeit** | Werte, Regeln, Kommunikationsstil | soul.yaml — manuell &
-auto |
+| **Persönlichkeit** | Werte, Regeln, Kommunikationsstil | soul.yaml — manuell & auto |
 | **Beziehungen** | Nutzer-Erkennung, Vertrauens-Modell, Präferenzen | relations.json — pro Nutzer |
 | **Kernwissen** | Fakten, die über Sessions hinweg bleiben | longterm.json — L3 |
 | **Eigenheiten** | Humor, Effizienz-Fokus, Deutsch-first | soul.yaml — wächst mit |
 
 Die Seele ist kein gimmick — sie definiert **wer Toti ist**, nicht was er tut. Session-State wird gelöscht; die Seele bleibt.
 
-## 6-Agenten Team (v9)
+## 5-Department Team (v9.2)
 
-| Agent | Modell | Rolle | Temperatur | Max Tokens |
+| Department | Modell | Rolle | Parallel | Profile |
 |---|---|---|---|---|
-| **NEXUS-0 · Toti** | `kimi-k2.6:cloud` | Orchestration, Gespräche, Tool-Dispatch | 0.7 | 4096 |
-| **SCOUT** | `glm-5.1:cloud` | Recherche, Analyse, Zusammenfassungen | 0.5 | 8192 |
-| **FORGE** | `qwen3-coder-next:cloud` | Code schreiben, debuggen, refactor | 0.3 | 8192 |
-| **LENS** | `kimi-k2.6:cloud` | Tiefenanalyse, Reasoning, Bewertung | 0.4 | 4096 |
-| **HERALD** | `minimax-m2.7:cloud` | Output-Generierung, Formatierung | 0.6 | 4096 |
-| **GHOST** | `deepseek-v4-flash:cloud` | Background-Tasks, schnelle Antworten | 0.3 | 2048 |
+| **CEO** | `glm-5.1:cloud` | Priorisierung, Delegation, Synthese | ✅ Synthese | `data/agents/ceo.yaml` |
+| **Research** | `glm-5.1:cloud` | Recherche, Analyse, Fakten | ✅ Parallel | `data/agents/research.yaml` |
+| **Engineering** | `qwen3-coder-next:cloud` | Code, Build, Deploy | ✅ Parallel | `data/agents/engineering.yaml` |
+| **Creative** | `gemma4:cloud` | Design, Text, UI/UX | ✅ Parallel | `data/agents/creative.yaml` |
+| **Operations** | `deepseek-v4-flash:cloud` | Planung, Monitoring, Schnelles | ✅ Parallel | `data/agents/operations.yaml` |
 
 | Fallback | Modell | Einsatzgebiet |
 |---|---|---|
 | **Cloud Fallback 1** | `deepseek-v4-flash:cloud` | Schneller Fallback bei Primärmodell-Ausfall |
 | **Cloud Fallback 2** | `glm-5.1:cloud` | Universeller Fallback |
-| **Emergency** | `qwen2.5:3b` | Offline-Notbetrieb (lokal, nur im Notfall) |
 
-Der Pair Router entscheidet automatisch welcher Agent die Aufgabe bekommt — über das `delegation`-Tool.
+### Complexity Routing
+
+| Level | Agenten | Modelle | Synthese | Beispiel |
+|---|---|---|---|---|
+| **simple** | 1 | fast | Nein | "Wie spät ist es?" |
+| **moderate** | 1-2 | default + specialist | Nein | "Erkläre mir Docker" |
+| **complex** | 2-4 | research + engineering + creative | ✅ CEO | "Baue mir eine API mit Tests" |
+| **critical** | 3-4 | CEO + research + engineering + ops | ✅ CEO | "Produktions-Deployment überprüfen" |
+
+### `/agent` Telegram-Commands
+
+| Command | Beschreibung |
+|---|---|
+| `/agent` | Alle Agenten auflisten (mit Stats) |
+| `/agent create <name> <rolle>` | Neuen Agenten erstellen |
+| `/agent assign <name> <skill>` | Skill einem Agenten zuweisen |
+| `/agent stats <name>` | Performance-Statistiken |
+| `/agent evolve <name>` | LLM-basierte Auto-Evolution triggern |
+
+## Fast Response Layer
+
+```
+Nutzer-Nachricht
+    │
+    ├─ Response Cache Check (< 10ms, bei Hit: sofortige Antwort)
+    ├─ Router klassifiziert Intent + Complexity
+    ├─ QuickResponder: Template-Ack SOFORT (< 100ms)
+    ├─ Parallel: fast-Model generiert besseren Ack → editiert Nachricht
+    │
+    ├─ Simple? → Einzelner Agent, Ergebnis senden
+    │
+    └─ Complex/Critical? → delegate_parallel()
+           ├─ Agent 1 (Research)    ──┐
+           ├─ Agent 2 (Engineering) ──┤ ThreadPoolExecutor
+           └─ Agent 3 (Creative)    ──┘
+           Erster fertig → Zwischenergebnis
+           Alle fertig → CEO synthetisiert → Finale Antwort
+```
 
 ## Memory-System
 
@@ -439,7 +654,7 @@ Alle **produktiv implementiert** — keine Platzhalter, keine Stubs:
 | `code_exec` | Python-Code in Sandbox ausführen |
 | `calculator` | Mathematische Ausdrücke berechnen |
 | `time` | Aktuelle Datum/Zeit |
-| `delegation` | Aufgabe an Spezialisten-Modell delegieren |
+| `delegation` | Aufgabe an Team-Abteilung delegieren (single/parallel/full_team) |
 | `memory` | L1→L4 Gedächtnis verwalten (remember/recall/stats) |
 
 Tool-Aufrufe erfolgen über XML-Tags im LLM-Output: `<tool>{"tool": "terminal", "command": "ls"}</tool>`
@@ -450,7 +665,7 @@ Toti verfügt über **156 Skills** in 22 Kategorien — von DevOps über Creativ
 
 ```mermaid
 graph TB
-    Nexus((NEXUS v9<br/>156 Skills))
+    Nexus((NEXUS v9.2<br/>156 Skills))
     devops["🔧 DevOps<br/>33 Skills"]
     Nexus --> devops
     softdev["💻 Software Dev<br/>31 Skills"]
@@ -504,7 +719,7 @@ llm:
   default_model: glm-5.1:cloud       # via Merge Proxy
   stream: true                       # Streaming-Responses
 
-  # 6-Agenten Delegation via Pair Router
+  # 5-Department Delegation via Pair Router
   models:
     coding: "qwen3-coder-next:cloud"
     research: "glm-5.1:cloud"
@@ -512,7 +727,7 @@ llm:
     creative: "gemma4:cloud"
     fast: "deepseek-v4-flash:cloud"
 
-  # Cloud-only Fallback (kein lokales Modell)
+  # Cloud-only Fallback
   fallback: ["deepseek-v4-flash:cloud", "glm-5.1:cloud"]
 
 soul:
@@ -526,6 +741,17 @@ memory:
   vector_search:
     enabled: true                    # Semantische Suche in L3
 
+# ⚡ Fast Response Layer (v9.2)
+fast_response:
+  enabled: true
+  hybrid_ack_timeout: 2.0           # Sekunden für Hybrid-Ack-Upgrade
+
+# ⚡ Response Cache (v9.2)
+response_cache:
+  max_cache_size: 500                # Max gecachte Q&A-Paare
+  cache_ttl: 604800                  # 7 Tage
+  similarity_threshold: 0.85         # Fuzzy-Match Schwelle
+
 session_manager:
   timeout_seconds: 3600              # 1h Session-Timeout
   max_sessions: 50                    # Max parallele Sessions
@@ -533,38 +759,34 @@ session_manager:
 telegram:
   streaming: true                    # Token-by-Token senden
   typing_indicator: true             # "Tippt..." anzeigen
-  parse_mode: "MarkdownV2"           # Rich Formatting
+  parse_mode: "MarkdownV2"          # Rich Formatting
   rate_limiter:
     rate: 0.33                       # 1 Nachricht / 3s
-    burst: 5                         # Max Burst
+    burst: 5                          # Max Burst
 
 heartbeat:
   enabled: true                      # Process Health Monitoring
-  interval: 60                       # Check alle 60s
+  interval: 60                        # Check alle 60s
 ```
 
 Umgebungsvariablen in `.env`: `OLLAMA_API_KEY`, `NEXUS_TG_TOKEN`, `NEXUS_TG_USERS`.
 
-## v7/v8 → v9 Migration
+## v9.1 → v9.2 Migration
 
-| | v7/v8 | v9 |
+| | v9.1 | v9.2 |
 |---|---|---|
-| **Agenten** | 1 Orchestrator + Delegation | 6-Agenten Team (Nexus-0, Scout, Forge, Lens, Herald, Ghost) |
-| **LLM** | Ollama Cloud (einzelne Modelle) | Ollama Cloud Merge Proxy (round-robin, cloud-only) |
-| **Routing** | Einfache Delegation | Pair Router + 6 spezialisierte Agenten |
-| **Tools** | 11 implementierte Werkzeuge | 11 Werkzeuge + Circular-Chain Detection |
-| **Gedächtnis** | L1→L4 persistent + Soul | L1→L4 + Vector Search (semantisch) |
-| **Identität** | Adaptive Seele | Adaptive Seele + DSGVO + Secret-Leak-Schutz |
-| **Sessions** | Global, shared | Per-Chat isoliert (Session Manager) |
-| **Streaming** | Ja (Token-by-Token) | Ja + MarkdownV2 + Rate-Limiting |
-| **Fallback** | Cloud → Local → Graceful | Cloud-only → Cloud Fallback → Emergency Local |
-| **Health** | Kein Monitoring | Heartbeat + Auto-Restart |
-| **Security** | Kein Output-Scrubbing | DSGVO-Modul + Secret-Leak-Schutz + Security Rules |
+| **Erste Antwort** | Warte auf Worker (2-10s) | Template-Ack < 100ms + Cache < 10ms |
+| **Agenten** | Sequentielle Delegation | Parallel (ThreadPoolExecutor, N Agenten) |
+| **Routing** | Intent nur (trivial/complex) | Intent + Complexity (simple/moderate/complex/critical) |
+| **Agent-Profile** | Hardcoded DEPARTMENTS | Persistente YAML-Profile mit Performance-Tracking |
+| **Auto-Evolution** | Nein | Pattern-basiert (alle 10 Tasks) + LLM-basiert (`/agent evolve`) |
+| **Response Cache** | Nein | Q&A-Cache mit Fuzzy-Match für wiederkehrende Fragen |
+| **Telegram Commands** | /start, /status, /team, /einstellungen | + `/agent` (create, assign, stats, evolve) |
 
 ## Entwicklung
 
 ```
-python nexus.py --test     # Self-Test (Imports · Tools · LLM · Soul)
+python nexus.py --test     # Self-Test (Imports · Tools · LLM · Soul · Cache)
 python nexus.py            # CLI-Modus (interaktiv)
 python nexus.py --telegram # Telegram-Bot (produktiv)
 ```

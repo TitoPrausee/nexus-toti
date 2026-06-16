@@ -828,9 +828,35 @@ class NexusTelegramBot:
         except Exception:
             pass
 
+        # Send immediate ack — user sees < 1s response before LLM processing starts
+        try:
+            ack_msg = await update.message.reply_text("🧠 Analysiere...")
+        except Exception:
+            ack_msg = None
+
         # Live feedback: asyncio.Queue for cross-thread communication
         feedback_queue = asyncio.Queue()
         step_log = []  # Shared list, populated by sync callback, read by async consumer
+
+        # Quick callback — updates ack from agent thread (cross-thread to async)
+        loop = asyncio.get_event_loop()
+        ack_msg_id = ack_msg.message_id if ack_msg else None
+
+        def quick_callback(ack_text):
+            """Called from agent thread to update the ack message with context."""
+            if ack_msg_id:
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        ctx.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=ack_msg_id,
+                            text=ack_text[:100]
+                        ),
+                        loop
+                    )
+                    future.result(timeout=3)
+                except Exception:
+                    pass
 
         # Sync callback — called from the agent thread
         def on_step(event):
@@ -856,7 +882,8 @@ class NexusTelegramBot:
             # Process with Pair architecture + personalization (runs in thread)
             response = await asyncio.to_thread(
                 self.agent.process, text, str(user.id),
-                feedback=emitter, platform="telegram"
+                feedback=emitter, platform="telegram",
+                quick_callback=quick_callback
             )
 
             typing_task.cancel()
@@ -878,6 +905,13 @@ class NexusTelegramBot:
                 await update.message.set_reaction("✅")
             except Exception:
                 pass
+
+            # Delete ack message — final response replaces it
+            if ack_msg:
+                try:
+                    await ack_msg.delete()
+                except Exception:
+                    pass
 
             # Send the actual response
             await self._send_response(chat_id, ctx, response)
@@ -907,6 +941,12 @@ class NexusTelegramBot:
             self._processing[user.id] = False
             self._feedback_emitters.pop(user.id, None)
             self._step_msg_ids.pop(user.id, None)
+            # Clean up ack message on any exit
+            if ack_msg:
+                try:
+                    await ack_msg.delete()
+                except Exception:
+                    pass
 
     # ─── Live Terminal Consumer ──────────────────────
 
