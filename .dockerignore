@@ -1,4 +1,4 @@
-# NEXUS v7 — Docker Ignore
+# NEXUS v9 — Docker Ignore
 # Exclude everything not needed for the runtime image
 
 # Version control
@@ -61,6 +61,7 @@ ROADMAP.md
 LICENSE
 *.md
 !README.md
+!data/skills/**/*.md
 
 # Logs
 *.log

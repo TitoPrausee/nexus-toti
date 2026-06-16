@@ -51,61 +51,16 @@ class ProjectTracker:
     Like Mercury's MEMORY.md but dynamic and queryable.
     """
 
-    # Default projects — Tito's active work
+    # Default projects — Nexus learns projects through conversations, not hardcoded defaults
     DEFAULT_PROJECTS = {
-        "block_sync": {
-            "name": "block_sync",
-            "status": "active",
-            "priority": 9,
-            "description": "Moodle Kursraumverwaltung (Jira MMZ003MOD-232, Uni Jena)",
-            "tech_stack": ["PHP", "Moodle", "Mustache", "JavaScript"],
-            "next_steps": ["Sprint 2: Mustache Templates", "Privacy Provider", "Konfigurierbare Semester"],
-            "notes": ["GitLab: git.uni-jena.de/rz/mmz/moodle/plugins/block_sync", "Test-Umgebung: moodle-05.dev.uni-jena.de"],
-        },
-        "local_iamulp": {
-            "name": "local_iamulp",
-            "status": "active",
-            "priority": 8,
-            "description": "Moodle Plugin für ActiveMQ IAM-ULP Integration (Uni Jena)",
-            "tech_stack": ["PHP", "Moodle", "Java", "ActiveMQ", "Docker", "K8s"],
-            "next_steps": ["Firewall Port 61616 freischalten (Daniel Günzel)", "Bridge testen"],
-            "notes": ["Dev-Moodle: moodle-dev.uni-jena.de", "K8s Bridge läuft, Firewall blockt"],
-        },
-        "macprinter": {
-            "name": "macprinter",
-            "status": "active",
-            "priority": 6,
-            "description": "Drucker-Portal für Uni Jena (ASP.NET 9 + Razor Pages)",
-            "tech_stack": ["ASP.NET 9", "Razor Pages", "EF Core", "MySQL", "LDAP", "SignalR"],
-            "next_steps": ["Phase 8: Deployment auf IIS"],
-            "notes": ["Server: cltinv-db-01.ads.uni-jena.de:8090", "GitLab: git.uni-jena.de/***REMOVED***/macos-printer-setup"],
-        },
-        "fitspar": {
-            "name": "fitspar",
-            "status": "active",
-            "priority": 7,
-            "description": "FitSpar Coach — Fitness-Loyalty-App (kommerziell)",
-            "tech_stack": ["Flutter 3", "Riverpod", ".NET 8", "PostgreSQL", "OpenFoodFacts"],
-            "next_steps": ["UI implementieren", "Backend API finalisieren", "Barcode Scanner"],
-            "notes": ["GitHub: github.com/***REMOVED***/fitspar-coach (privat)", "KOMMERZIELLL — nicht Open Source"],
-        },
         "nexus": {
             "name": "nexus",
             "status": "active",
             "priority": 10,
-            "description": "Nexus — ich selbst, autonomer KI-Agent mit Seele",
+            "description": "Nexus — autonomer KI-Agent mit Seele und 6-Agenten-Team",
             "tech_stack": ["Python", "Ollama Cloud", "Telegram Bot API", "Docker"],
-            "next_steps": ["Heartbeat System", "Project Tracker vervollständigen", "Merge Proxy Integration"],
-            "notes": ["GitHub: github.com/***REMOVED***/nexus-toti (privat)", "Merge Proxy: host.docker.internal:11435"],
-        },
-        "opencode_fusion": {
-            "name": "opencode_fusion",
-            "status": "paused",
-            "priority": 4,
-            "description": "Autonomer Multi-Agent Coding Agent (Sprint 4 abgeschlossen)",
-            "tech_stack": ["TypeScript", "Bun", "Effect-TS", "SQLite", "Zod"],
-            "next_steps": ["Sprint 5 planen wenn Zeit"],
-            "notes": ["GitLab: gitlab.com/***REMOVED***e/opencode-fusion (privat)"],
+            "next_steps": ["Skills integrieren", "DSGVO-Modul testen", "Pair Router optimieren"],
+            "notes": ["GitHub: github.com/***REMOVED***/nexus-toti (privat)"],
         },
     }
 

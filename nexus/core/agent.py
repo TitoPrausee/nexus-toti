@@ -1,8 +1,9 @@
 """
-NEXUS v8.1 — Agent Core
+NEXUS v9.0 — Agent Core
 Pair architecture: Router/Worker/Critic for efficient Ollama Cloud usage.
 Personalization: learns about users through natural conversation.
 Hermes-inspired: iteration budget, think-block stripping, tool result budgets.
+Skills injection: loads skill summary into system prompt for LLM awareness.
 
 Architecture:
 - Router (gemini-3-flash): classifies intent, answers trivial, routes complex
@@ -234,9 +235,14 @@ class NexusAgent:
 
         # 5. Available tools
         tool_descs = self._get_tool_descriptions()
+
+        # 6. Available skills (injected as compact overview)
+        skills_summary = self._get_skills_summary()
+
         parts.append(
             f"\n{self._no_meta_rule}\n"
             f"{self._security_rule}\n\n"
+            f"{skills_summary}\n\n"
             f"Deine Faehigkeiten — du KANNST all das, nutze es:\n"
             f"- terminal: Shell-Befehle ausfuehren (git, pip, curl, gh, python, etc.)\n"
             f"- web_search: Im Internet suchen (DuckDuckGo)\n"
@@ -291,6 +297,22 @@ class NexusAgent:
         }
         lines = [f"- **{k}**: {v}" for k, v in descs.items()]
         return "\n".join(lines)
+
+    # ─── Skills Summary ──────────────────────────────────
+
+    def _get_skills_summary(self) -> str:
+        """Load available skills summary from data/skills/ into system prompt.
+
+        Returns a compact overview (name + description from YAML frontmatter),
+        not the full skill content. This lets the LLM know what skills exist
+        so it can reference them or activate them when relevant.
+        """
+        try:
+            from nexus.core.skill_autocreator import get_skills_summary
+            return get_skills_summary(max_skills=200)
+        except Exception as e:
+            log.debug(f"Failed to load skills summary: {e}")
+            return ""
 
     # ─── Main Entry Point (Pair Architecture) ──────────
 

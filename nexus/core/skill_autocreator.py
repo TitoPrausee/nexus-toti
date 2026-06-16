@@ -1,7 +1,8 @@
 """
-NEXUS v7 — Skill Auto-Creator
+NEXUS v9 — Skill Auto-Creator
 Automatically creates skill files when the agent learns something new.
 Scans conversation for learnable patterns and writes .md skill files.
+Also provides skill listing and summary generation for system prompt injection.
 """
 
 import os
@@ -14,7 +15,7 @@ from datetime import datetime
 
 log = logging.getLogger("nexus.skill_creator")
 
-# Directory for storing auto-created skills
+# Directory for storing skills (auto-created + curated)
 SKILLS_DIR = Path("data/skills")
 
 
@@ -167,17 +168,92 @@ def maybe_create_skill(response: str, tool_calls: list, user_message: str,
 
 
 def list_auto_skills() -> list[dict]:
-    """List all auto-created skills."""
+    """List all skills with name and description from YAML frontmatter.
+
+    Scans recursively: data/skills/category/skillname/SKILL.md
+    and data/skills/skillname/SKILL.md (flat structure).
+    """
     if not SKILLS_DIR.exists():
         return []
 
     skills = []
-    for skill_dir in SKILLS_DIR.iterdir():
-        skill_md = skill_dir / "SKILL.md"
-        if skill_md.exists():
-            skills.append({
-                "name": skill_dir.name,
-                "path": str(skill_md),
-                "created": skill_md.stat().st_mtime,
-            })
+    # Find all SKILL.md files recursively (category/skillname/SKILL.md or skillname/SKILL.md)
+    for skill_md in SKILLS_DIR.rglob("SKILL.md"):
+        skill_dir = skill_md.parent
+        # Determine category from parent directory structure
+        # e.g. data/skills/devops/ollama-launch-setup/SKILL.md -> category=devops
+        # e.g. data/skills/dogfood/SKILL.md -> category=general (flat structure)
+        relative = skill_dir.relative_to(SKILLS_DIR)
+        parts = relative.parts
+        if len(parts) >= 2:
+            # Nested: category/skillname
+            category = parts[0]
+        else:
+            # Flat: skillname (no category directory)
+            category = "general"
+
+        skill_info = {
+            "name": skill_dir.name,
+            "path": str(skill_md),
+            "description": "",
+            "category": category,
+            "created": skill_md.stat().st_mtime,
+        }
+        # Parse YAML frontmatter for name + description
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                end = content.find("---", 3)
+                if end > 0:
+                    frontmatter = content[3:end].strip()
+                    for line in frontmatter.split("\n"):
+                        line = line.strip()
+                        if line.startswith("name:"):
+                            skill_info["name"] = line.split(":", 1)[1].strip()
+                        elif line.startswith("description:"):
+                            desc = line.split(":", 1)[1].strip().strip('"').strip("'")
+                            skill_info["description"] = desc
+                        elif line.startswith("category:"):
+                            skill_info["category"] = line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+        skills.append(skill_info)
     return sorted(skills, key=lambda s: s["created"], reverse=True)
+
+
+def get_skills_summary(max_skills: int = 200, max_chars: int = 4000) -> str:
+    """Build a concise skill summary for the system prompt.
+
+    Returns a compact category-grouped overview with skill names only.
+    Not full descriptions — just enough for the LLM to know what categories
+    and skills exist. Keeps the summary under max_chars to avoid bloating
+    the system prompt.
+    """
+    skills = list_auto_skills()
+    if not skills:
+        return ""
+
+    # Group by category
+    by_category: dict[str, list[dict]] = {}
+    for skill in skills[:max_skills]:
+        cat = skill.get("category", "general") or "general"
+        by_category.setdefault(cat, []).append(skill)
+
+    # Build compact lines: category: skill1, skill2, skill3
+    lines = []
+    for cat, cat_skills in sorted(by_category.items()):
+        names = [s.get("name", "unknown") for s in cat_skills]
+        lines.append(f"  {cat}: {', '.join(names)}")
+
+    header = f"Verfuegbare Skills ({len(skills)} insgesamt):"
+    result = header + "\n" + "\n".join(lines)
+
+    # Truncate if too long for system prompt
+    if len(result) > max_chars:
+        # Shorten: only show skill counts per category
+        short_lines = []
+        for cat, cat_skills in sorted(by_category.items()):
+            short_lines.append(f"  {cat}: {len(cat_skills)} Skills")
+        result = header + "\n" + "\n".join(short_lines)
+
+    return result
