@@ -1,9 +1,10 @@
 """
-NEXUS v8.2 — Telegram Bot Interface (python-telegram-bot)
+NEXUS v9 — Telegram Bot Interface (python-telegram-bot)
 Pair architecture: Router/Worker for efficient responses.
 Personalization: learns about users through natural conversation.
 DSGVO-compliant: per-user consent, data minimization, right to deletion.
 
+v9.1: /einstellungen command — view and change all settings from Telegram
 v8.2.1: Live terminal block — asyncio.Queue + consumer task for real-time
         step updates. Sync callback puts events on queue, async consumer
         edits the Telegram message in real-time.
@@ -115,6 +116,8 @@ class NexusTelegramBot:
         app.add_handler(CommandHandler("data", self._cmd_data))
         app.add_handler(CommandHandler("consent", self._cmd_consent))
         app.add_handler(CommandHandler("team", self._cmd_team))
+        app.add_handler(CommandHandler("einstellungen", self._cmd_settings))
+        app.add_handler(CommandHandler("settings", self._cmd_settings))
         app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, self._handle_message
         ))
@@ -182,7 +185,7 @@ class NexusTelegramBot:
         status = "⚡ arbeitet" if processing else "✅ bereit"
 
         status_text = (
-            f"⚡ *Nexus v8\\.2* — {status}\n\n"
+            f"⚡ *Nexus v9* — {status}\n\n"
             f"🏗 Architektur: Router \\+ Worker \\+ Team\n"
             f"📡 Sessions: {self.session_manager.stats()['active_sessions']} aktiv\n"
             f"🔒 DSGVO: konform"
@@ -247,6 +250,180 @@ class NexusTelegramBot:
             line = escape_markdown_v2(line)
             formatted.append(line)
         await update.message.reply_text("\n".join(formatted), parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _cmd_settings(self, update, ctx):
+        """Show all configurable settings and allow changes via subcommands.
+
+        /einstellungen — Show all settings
+        /einstellungen model <name> — Change default model
+        /einstellungen sprache <de|en> — Change language
+        /einstellungen tone <0-1> — Change formality (0=casual, 1=formal)
+        /einstellungen humor <0-1> — Change humor level
+        /einstellungen verbose <0-1> — Change verbosity
+        /einstellungen reset — Reset to defaults
+        """
+        user = update.effective_user
+        uid = str(user.id)
+        parts = (update.message.text or "").strip().split()
+
+        # No subcommand — show all settings
+        if len(parts) <= 1:
+            soul = self.agent.soul
+            user_ctx = soul.get_user_context(uid) or {}
+            rel = soul.relationships.get(uid, {})
+
+            model_name = self.config.get("llm", {}).get("default_model", "glm-5.1:cloud")
+            language = soul.personality.get("language_default", "de")
+            formality = soul.personality.get("formality_level", 0.3)
+            humor = soul.personality.get("humor_style", "trocken-witzig")
+            verbose = soul.personality.get("verbosity", 0.3)
+            tech_depth = soul.personality.get("technical_depth", 0.8)
+
+            text = (
+                f"⚙ *Einstellungen* — Nexus v9\n\n"
+                f"📡 *Modell:* {escape_markdown_v2(model_name)}\n"
+                f"🌍 *Sprache:* {escape_markdown_v2(language)}\n"
+                f"👔 *Formalitaet:* {formality} \\(0\\=locker, 1\\=formell\\)\n"
+                f"😄 *Humor:* {escape_markdown_v2(str(humor))}\n"
+                f"📊 *Ausfuehrlichkeit:* {verbose} \\(0\\=kurz, 1\\=lang\\)\n"
+                f"🔬 *Technische Tiefe:* {tech_depth} \\(0\\=einfach, 1\\=experte\\)\n\n"
+                f"📝 *Aenderungen:*\n"
+                f"/einstellungen model \\<name\\>\n"
+                f"/einstellungen sprache de|en\n"
+                f"/einstellungen tone 0\\.0 \\- 1\\.0\n"
+                f"/einstellungen humor 0\\.0 \\- 1\\.0\n"
+                f"/einstellungen verbose 0\\.0 \\- 1\\.0\n"
+                f"/einstellungen reset\n\n"
+                f"💡 *Beispiel:* /einstellungen tone 0\\.5"
+            )
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(text.replace("\\", "").replace("*", "").replace("`", ""))
+            return
+
+        # Parse subcommand
+        subcmd = parts[1].lower() if len(parts) > 1 else ""
+
+        if subcmd == "model":
+            if len(parts) < 3:
+                await update.message.reply_text("📊 Verfuegbare Modelle:\n\n• glm-5.1:cloud\n• deepseek-v4-flash:cloud\n• kimi-k2.6:cloud\n• qwen3-coder-next:cloud\n\n/einstellungen model <name>")
+                return
+            new_model = parts[2]
+            self.config.setdefault("llm", {})["default_model"] = new_model
+            self.agent.llm.config["default_model"] = new_model
+            text = f"✅ Modell geaendert: {escape_markdown_v2(new_model)}"
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(f"Modell geaendert: {new_model}")
+            return
+
+        elif subcmd in ("sprache", "language", "lang"):
+            if len(parts) < 3 or parts[2].lower() not in ("de", "en", "es", "fr"):
+                await update.message.reply_text("🌍 Verfuegbare Sprachen: de, en, es, fr\n\n/einstellungen sprache de")
+                return
+            new_lang = parts[2].lower()
+            self.agent.soul.personality["language_default"] = new_lang
+            self.agent.soul.save()
+            text = f"✅ Sprache geaendert: {escape_markdown_v2(new_lang)}"
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(f"Sprache geaendert: {new_lang}")
+            return
+
+        elif subcmd in ("tone", "formality", "formalitaet"):
+            if len(parts) < 3:
+                await update.message.reply_text("👔 Formalitaet: 0.0 (locker) bis 1.0 (formell)\n\n/einstellungen tone 0.5")
+                return
+            try:
+                val = float(parts[2])
+                val = max(0.0, min(1.0, val))
+            except ValueError:
+                await update.message.reply_text("❌ Wert muss eine Zahl zwischen 0 und 1 sein.")
+                return
+            self.agent.soul.personality["formality_level"] = val
+            self.agent.soul.save()
+            text = f"✅ Formalitaet geaendert: {val}"
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(f"Formalitaet geaendert: {val}")
+            return
+
+        elif subcmd in ("humor",):
+            if len(parts) < 3:
+                await update.message.reply_text(
+                    "😄 Humor-Stile:\n\n"
+                    "• trocken-witzig\n• locker-witzig\n• trocken-sachlich\n• ironisch\n"
+                    "Oder numerisch: 0.0 (kein Humor) bis 1.0 (viel Humor)\n\n"
+                    "/einstellungen humor trocken-witzig"
+                )
+                return
+            val_str = parts[2].lower()
+            humor_styles = ["trocken-witzig", "locker-witzig", "trocken-sachlich", "ironisch"]
+            if val_str in humor_styles:
+                self.agent.soul.personality["humor_style"] = val_str
+                self.agent.soul.save()
+                text = f"✅ Humor-Stil geaendert: {escape_markdown_v2(val_str)}"
+            else:
+                try:
+                    num = float(val_str)
+                    num = max(0.0, min(1.0, num))
+                    self.agent.soul.personality["humor_level"] = num
+                    self.agent.soul.save()
+                    text = f"✅ Humor-Level geaendert: {num}"
+                except ValueError:
+                    await update.message.reply_text("❌ Unbekannter Humor-Stil.")
+                    return
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(text.replace("\\", "").replace("*", ""))
+            return
+
+        elif subcmd in ("verbose", "ausfuehrlichkeit"):
+            if len(parts) < 3:
+                await update.message.reply_text("📊 Ausfuehrlichkeit: 0.0 (kurz) bis 1.0 (lang)\n\n/einstellungen verbose 0.3")
+                return
+            try:
+                val = float(parts[2])
+                val = max(0.0, min(1.0, val))
+            except ValueError:
+                await update.message.reply_text("❌ Wert muss eine Zahl zwischen 0 und 1 sein.")
+                return
+            self.agent.soul.personality["verbosity"] = val
+            self.agent.soul.save()
+            text = f"✅ Ausfuehrlichkeit geaendert: {val}"
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(f"Ausfuehrlichkeit geaendert: {val}")
+            return
+
+        elif subcmd == "reset":
+            # Reset personality to defaults from soul.yaml
+            self.agent.soul.personality = {
+                "language_default": "de",
+                "formality_level": 0.3,
+                "humor_style": "trocken-witzig",
+                "technical_depth": 0.8,
+                "verbosity": 0.3,
+            }
+            self.agent.soul.save()
+            text = "✅ Einstellungen zurueckgesetzt auf Defaults."
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(text)
+            return
+
+        else:
+            await update.message.reply_text(
+                f"❓ Unbekannter Befehl: /einstellungen {subcmd}\n\n"
+                f"Verfuegbar: model, sprache, tone, humor, verbose, reset"
+            )
 
     # ─── Message Handler ───────────────────────────────
 
