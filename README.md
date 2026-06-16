@@ -341,28 +341,39 @@ nexus/
 
 ## Quick Start
 
+### Einzeilen-Installation (empfohlen)
+
 ```bash
-# 1 — Install
-pip install -r requirements.txt
-
-# 2 — Configure
-cp .env.example .env
-# Edit .env: OLLAMA_API_KEY, NEXUS_TG_TOKEN, NEXUS_TG_USERS
-
-# 3 — Self-Test
-python nexus.py --test
-
-# 4 — Run
-python nexus.py              # CLI-Modus
-python nexus.py --telegram   # Telegram-Bot
+curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash
 ```
 
-### Docker
+Oder nicht-interaktiv mit Telegram-Token:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash -s -- --token 123456:ABC-DEF --chat-id ***REMOVED***
+```
+
+Deinstallation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash -s -- --uninstall
+```
+
+### Docker (manuell)
 
 ```bash
 git clone https://github.com/***REMOVED***/nexus-toti.git && cd nexus-toti
 cp .env.example .env         # Api-Keys eintragen
-docker compose up nexus-telegram
+docker compose up -d nexus-telegram
+```
+
+### Lokale Installation (ohne Docker)
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env         # Api-Keys eintragen
+python nexus.py --test       # Self-Test
+python nexus.py --telegram   # Telegram-Bot starten
 ```
 
 ## Soul-Driven Architecture
