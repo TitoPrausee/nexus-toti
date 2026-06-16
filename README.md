@@ -1,15 +1,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-9.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0a0a0a" alt="Python">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge&labelColor=0a0a0a" alt="License">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="License">
   <img src="https://img.shields.io/badge/status-production-brightgreen?style=for-the-badge&labelColor=0a0a0a" alt="Status">
 </p>
 
 <h1 align="center">NEXUS v9</h1>
 
 <p align="center">
-  <strong>Autonomer KI-Agent mit Seele und Team.</strong><br>
-  6 spezialisierte Agenten, ein Orchestrator, ein Gedächtnis — denkt, delegiert und erinnert sich.
+  <strong>Autonomer KI-Agent mit Seele und 156 Skills.</strong><br>
+  6 spezialisierte Agenten, Pair Router, DSGVO-konform — denkt, delegiert und erinnert sich.
 </p>
 
 ---
@@ -433,6 +433,56 @@ Alle **produktiv implementiert** — keine Platzhalter, keine Stubs:
 
 Tool-Aufrufe erfolgen über XML-Tags im LLM-Output: `<tool>{"tool": "terminal", "command": "ls"}</tool>`
 
+## Skills
+
+Toti verfügt über **156 Skills** in 22 Kategorien — von DevOps über Creative bis Red Teaming.
+
+```mermaid
+graph TB
+    Nexus((NEXUS v9<br/>156 Skills))
+    devops["🔧 DevOps<br/>33 Skills"]
+    Nexus --> devops
+    softdev["💻 Software Dev<br/>31 Skills"]
+    Nexus --> softdev
+    creative["🎨 Creative<br/>17 Skills"]
+    Nexus --> creative
+    prod["📄 Productivity<br/>14 Skills"]
+    Nexus --> prod
+    mlops["🧪 MLOps<br/>13 Skills"]
+    Nexus --> mlops
+    github["🐙 GitHub<br/>8 Skills"]
+    Nexus --> github
+    agents["🤖 Autonomous Agents<br/>7 Skills"]
+    Nexus --> agents
+    apple["🍎 Apple<br/>6 Skills"]
+    Nexus --> apple
+    research["🔬 Research<br/>5 Skills"]
+    Nexus --> research
+    media["🎬 Media<br/>4 Skills"]
+    Nexus --> media
+    mcp["🔌 MCP<br/>3 Skills"]
+    Nexus --> mcp
+    gaming["🎮 Gaming<br/>3 Skills"]
+    Nexus --> gaming
+    smarthome["🏠 Smart Home<br/>2 Skills"]
+    Nexus --> smarthome
+    redteam["🔒 Red Teaming<br/>2 Skills"]
+    Nexus --> redteam
+    workflow["🔍 Workflow<br/>1 Skill"]
+    Nexus --> workflow
+    other["📦 7 more<br/>7 Skills"]
+    Nexus --> other
+
+    style Nexus fill:#1a1a2e,stroke:#e94560,color:#fff
+    style devops fill:#16213e,stroke:#533483,color:#fff
+    style softdev fill:#16213e,stroke:#533483,color:#fff
+    style creative fill:#2a1a3e,stroke:#e94560,color:#fff
+    style mlops fill:#1a2e1a,stroke:#4CAF50,color:#fff
+    style agents fill:#0f3460,stroke:#533483,color:#fff
+```
+
+👉 **Vollständige Skill-Dokumentation mit Workflow-Diagrammen:** [data/skills/SKILLS.md](data/skills/SKILLS.md)
+
 ## Konfiguration
 
 Alle Einstellungen zentral in `config.yaml`:
@@ -510,4 +560,10 @@ python nexus.py --telegram # Telegram-Bot (produktiv)
 
 ## Lizenz
 
-MIT
+GNU General Public License v3.0 (GPL-3.0)
+
+Freie Nutzung, Modifikation und Verbreitung erlaubt — auch kommerziell.
+**Aber:** Derivate müssen unter derselben Lizenz veröffentlicht werden (Copyleft).
+Das verhindert Code-Klau: wer Nexus nutzt und verbessert, muss die Verbesserungen offenlegen.
+
+Siehe [LICENSE](LICENSE) für den vollständigen Lizenztext.

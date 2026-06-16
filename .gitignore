@@ -1,5 +1,7 @@
 .env
-data/
+data/memory/
+data/sessions/
+!data/skills/
 __pycache__/
 *.pyc
 nexus_session.session
