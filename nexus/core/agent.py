@@ -910,7 +910,31 @@ class NexusAgent:
             return ToolResult(True, result_text, data={"mode": "full_team"})
         elif mode == "parallel" or (complexity in ("complex", "critical") and mode != "single"):
             # Parallel delegation based on complexity
-            results = self.team.delegate_parallel(task, context=context, complexity=complexity)
+            # Wire progress_callback to emit FeedbackEvents for live agent displays
+            def on_delegate_progress(event_type, dept, task_or_none):
+                if not self._feedback:
+                    return
+                if event_type == "agent_start":
+                    dept_config = self.team.DEPARTMENTS.get(dept, {})
+                    self._feedback.agent_start(
+                        department=dept,
+                        model_name=dept_config.get("model", ""),
+                    )
+                elif event_type == "agent_done":
+                    dept_config = self.team.DEPARTMENTS.get(dept, {})
+                    elapsed = task_or_none.elapsed if task_or_none else 0
+                    success = task_or_none.status == "completed" if task_or_none else False
+                    self._feedback.agent_done(
+                        department=dept,
+                        model_name=dept_config.get("model", ""),
+                        elapsed=elapsed,
+                        success=success,
+                    )
+
+            results = self.team.delegate_parallel(
+                task, context=context, complexity=complexity,
+                progress_callback=on_delegate_progress,
+            )
 
             # Build result from all completed tasks
             completed = [r for r in results if r.status == "completed"]

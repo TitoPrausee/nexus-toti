@@ -23,6 +23,9 @@ class FeedbackType(Enum):
     TOOL_RESULT = "tool_result"
     PROGRESS = "progress"
     DONE = "done"
+    AGENT_START = "agent_start"
+    AGENT_PROGRESS = "agent_progress"
+    AGENT_DONE = "agent_done"
 
 
 # Mercury-style icons per tool type
@@ -53,6 +56,9 @@ class FeedbackEvent:
     icon: str = ""
     timestamp: float = 0.0
     step: int = 0
+    department: str = ""
+    model_name: str = ""
+    elapsed: float = 0.0
 
     def __post_init__(self):
         if not self.timestamp:
@@ -89,7 +95,9 @@ class FeedbackEmitter:
         self._done = threading.Event()
 
     def emit(self, event_type: FeedbackType, message: str,
-             detail: str = "", icon: str = ""):
+             detail: str = "", icon: str = "",
+             department: str = "", model_name: str = "",
+             elapsed: float = 0.0):
         """Emit a feedback event — thread-safe."""
         with self._lock:
             self._step += 1
@@ -99,6 +107,9 @@ class FeedbackEmitter:
                 detail=detail[:120],  # Keep it short
                 icon=icon,
                 step=self._step,
+                department=department,
+                model_name=model_name,
+                elapsed=elapsed,
             )
             self.events.append(event)
 
@@ -164,6 +175,44 @@ class FeedbackEmitter:
     def done(self, summary: str = ""):
         self.emit(FeedbackType.DONE, summary or "Fertig", icon="✨")
         self.mark_done()
+
+    # ─── Agent Events ──────────────────────────────
+
+    def agent_start(self, department: str, model_name: str = "", icon: str = ""):
+        """Emit AGENT_START — a department agent has started working."""
+        dept_icons = {
+            "ceo": "👔", "research": "🔍", "engineering": "💻",
+            "creative": "🎨", "operations": "📋",
+        }
+        if not icon:
+            icon = dept_icons.get(department, "🤖")
+        name = department.capitalize()
+        self.emit(
+            FeedbackType.AGENT_START, name,
+            detail=model_name, icon=icon,
+            department=department, model_name=model_name,
+        )
+
+    def agent_progress(self, department: str, message: str, detail: str = ""):
+        """Emit AGENT_PROGRESS — a department agent made progress."""
+        self.emit(
+            FeedbackType.AGENT_PROGRESS, message,
+            detail=detail[:120], icon="⏳",
+            department=department,
+        )
+
+    def agent_done(self, department: str, model_name: str = "",
+                   elapsed: float = 0.0, success: bool = True):
+        """Emit AGENT_DONE — a department agent has finished."""
+        icon = "✅" if success else "❌"
+        name = department.capitalize()
+        detail = f"{elapsed:.1f}s" if elapsed > 0 else ""
+        self.emit(
+            FeedbackType.AGENT_DONE, name,
+            detail=detail, icon=icon,
+            department=department, model_name=model_name,
+            elapsed=elapsed,
+        )
 
     def format_progress(self, last_n: int = 0) -> str:
         """Format events as display string. last_n=0 means all."""

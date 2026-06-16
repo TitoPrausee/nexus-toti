@@ -1,9 +1,10 @@
 """
-NEXUS v9 — Telegram Bot Interface (python-telegram-bot)
+NEXUS v9.2 — Telegram Bot Interface (python-telegram-bot)
 Pair architecture: Router/Worker for efficient responses.
 Personalization: learns about users through natural conversation.
 DSGVO-compliant: per-user consent, data minimization, right to deletion.
 
+v9.2: Live status display (frameless), per-agent displays, /background /show commands.
 v9.1: /einstellungen command — view and change all settings from Telegram
 v8.2.1: Live terminal block — asyncio.Queue + consumer task for real-time
         step updates. Sync callback puts events on queue, async consumer
@@ -14,6 +15,8 @@ import os
 import re
 import asyncio
 import logging
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from telegram import Update
@@ -34,6 +37,49 @@ from nexus.interfaces.markdown_utils import escape_markdown_v2, format_markdown_
 
 log = logging.getLogger("nexus.telegram")
 
+# ─── Live Status Display ──────────────────────────────────
+
+STEP_ICONS = {
+    FeedbackType.THINKING: "💭",
+    FeedbackType.LLM_CALL: "⚡",
+    FeedbackType.TOOL_START: "🔧",
+    FeedbackType.TOOL_RESULT: "✅",
+    FeedbackType.PROGRESS: "📡",
+    FeedbackType.DONE: "✨",
+    FeedbackType.AGENT_START: "🤖",
+    FeedbackType.AGENT_PROGRESS: "⏳",
+    FeedbackType.AGENT_DONE: "✅",
+}
+
+DEPT_ICONS = {
+    "ceo": "👔",
+    "research": "🔍",
+    "engineering": "💻",
+    "creative": "🎨",
+    "operations": "📋",
+}
+
+DEPT_NAMES = {
+    "ceo": "CEO",
+    "research": "Research",
+    "engineering": "Engineering",
+    "creative": "Creative",
+    "operations": "Operations",
+}
+
+
+@dataclass
+class AgentDisplayState:
+    """Tracks per-agent Telegram message state for live displays."""
+    department: str
+    display_name: str
+    model_name: str
+    icon: str
+    message_id: int = 0
+    steps: list = field(default_factory=list)
+    status: str = "running"  # running | completed | failed
+    start_time: float = 0.0
+
 # ─── Terminal-style step formatting ─────────────────────────
 
 STEP_ICONS = {
@@ -50,9 +96,8 @@ class NexusTelegramBot:
     """
     Telegram bot using python-telegram-bot.
 
+    v9.2: Live status display (frameless), per-agent displays, /background /show.
     v8.2.1: Live step feedback via asyncio.Queue + consumer task.
-            Terminal block edits the Telegram message in real-time
-            as each step arrives.
     """
 
     def __init__(self, agent: NexusAgent, config: dict = None):
@@ -72,7 +117,10 @@ class NexusTelegramBot:
         self._processing = {}  # user_id -> bool
         self._interrupt_queue = {}  # user_id -> list[pending messages]
         self._feedback_emitters = {}  # user_id -> FeedbackEmitter
-        self._step_msg_ids = {}  # user_id -> message_id for terminal block
+        self._status_msg_ids = {}  # user_id -> message_id for live status
+        self._agent_displays = {}  # user_id -> {department: AgentDisplayState}
+        self._background_mode = {}  # user_id -> bool (True = hide agent details)
+        self._last_edit_time = {}  # chat_id -> float (rate limit throttle)
         self._app = None  # Reference to the Application for bot API access
         self.dsgvo = DSGVOCompliance(
             data_dir=self.config.get("dsgvo", {}).get("data_dir", "data/dsgvo")
@@ -118,6 +166,8 @@ class NexusTelegramBot:
         app.add_handler(CommandHandler("consent", self._cmd_consent))
         app.add_handler(CommandHandler("team", self._cmd_team))
         app.add_handler(CommandHandler("agent", self._cmd_agent))
+        app.add_handler(CommandHandler("background", self._cmd_background))
+        app.add_handler(CommandHandler("show", self._cmd_show))
         app.add_handler(CommandHandler("einstellungen", self._cmd_settings))
         app.add_handler(CommandHandler("settings", self._cmd_settings))
         app.add_handler(CommandHandler("version", self._cmd_version))
@@ -179,6 +229,8 @@ class NexusTelegramBot:
             "🔧 `/status` — Infos ueber mich\n"
             "👥 `/team` — Team\\-Uebersicht\n"
             "🤖 `/agent` — Agenten\\-Management\\(create/assign/stats/evolve\\)\n"
+            "👁 `/background` — Agenten\\-Details ausblenden\n"
+            "📊 `/show` — Agenten\\-Details wieder einblenden\n"
             "📋 `/data` — Deine Daten einsehen \\(DSGVO Art\\. 15\\)\n"
             "🗑 `/delete` — Deine Daten löschen \\(DSGVO Art\\. 17\\)\n"
             "🔒 `/consent` — Einwilligung verwalten"
@@ -444,6 +496,42 @@ class NexusTelegramBot:
             "/agent assign \\<name\\> \\<skill\\>\n"
             "/agent stats \\<name\\>\n"
             "/agent evolve \\<name\\>",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    # ─── /background and /show ────────────────────────────
+
+    async def _cmd_background(self, update, ctx):
+        """Hide agent detail displays during processing."""
+        user = update.effective_user
+        self._background_mode[user.id] = True
+
+        # Delete any existing agent display messages for this user
+        displays = self._agent_displays.get(user.id, {})
+        chat_id = update.effective_chat.id
+        for dept, state in displays.items():
+            if state.message_id:
+                try:
+                    await ctx.bot.delete_message(chat_id=chat_id, message_id=state.message_id)
+                except Exception:
+                    pass
+
+        await update.message.reply_text(
+            "👁 *Hintergrundmodus* aktiviert\\.\n\n"
+            "Agenten\\-Details werden nicht mehr angezeigt\\.\n"
+            "/show zum Wiederherstellen\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    async def _cmd_show(self, update, ctx):
+        """Show agent detail displays during processing."""
+        user = update.effective_user
+        self._background_mode[user.id] = False
+
+        await update.message.reply_text(
+            "📊 *Agenten\\-Details* wieder sichtbar\\.\n\n"
+            "Beim naechsten Auftrag werden Agenten\\-Displays eingeblendet\\.\n"
+            "/background zum Ausblenden\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
@@ -820,7 +908,8 @@ class NexusTelegramBot:
 
         # ─── Normal processing ───────────────────────
         self._processing[user.id] = True
-        self._step_msg_ids.pop(user.id, None)
+        self._status_msg_ids.pop(user.id, None)
+        self._agent_displays.pop(user.id, None)
 
         # React to user message
         try:
@@ -828,28 +917,22 @@ class NexusTelegramBot:
         except Exception:
             pass
 
-        # Send immediate ack — user sees < 1s response before LLM processing starts
-        try:
-            ack_msg = await update.message.reply_text("🧠 Analysiere...")
-        except Exception:
-            ack_msg = None
-
         # Live feedback: asyncio.Queue for cross-thread communication
         feedback_queue = asyncio.Queue()
-        step_log = []  # Shared list, populated by sync callback, read by async consumer
+        step_log = []
 
-        # Quick callback — updates ack from agent thread (cross-thread to async)
+        # Quick callback — updates live status message from agent thread
         loop = asyncio.get_event_loop()
-        ack_msg_id = ack_msg.message_id if ack_msg else None
 
         def quick_callback(ack_text):
-            """Called from agent thread to update the ack message with context."""
-            if ack_msg_id:
+            """Called from agent thread to update the live status message."""
+            msg_id = self._status_msg_ids.get(user.id)
+            if msg_id:
                 try:
                     future = asyncio.run_coroutine_threadsafe(
                         ctx.bot.edit_message_text(
                             chat_id=chat_id,
-                            message_id=ack_msg_id,
+                            message_id=msg_id,
                             text=ack_text[:100]
                         ),
                         loop
@@ -869,9 +952,9 @@ class NexusTelegramBot:
         emitter = FeedbackEmitter(callback=on_step)
         self._feedback_emitters[user.id] = emitter
 
-        # Start the live terminal consumer task
+        # Start the live status consumer task
         consumer_task = asyncio.create_task(
-            self._terminal_consumer(chat_id, ctx, user.id, feedback_queue, step_log)
+            self._status_consumer(chat_id, ctx, user.id, feedback_queue, step_log)
         )
 
         try:
@@ -896,9 +979,9 @@ class NexusTelegramBot:
             await feedback_queue.put(None)  # Sentinel
             await consumer_task
 
-            # Finalize terminal block (mark as DONE)
+            # Finalize live status (mark as DONE)
             if step_log:
-                await self._finalize_terminal_block(chat_id, ctx, user.id, step_log)
+                await self._finalize_live_status(chat_id, ctx, user.id, step_log)
 
             # Change reaction from 👀 to ✅
             try:
@@ -906,12 +989,8 @@ class NexusTelegramBot:
             except Exception:
                 pass
 
-            # Delete ack message — final response replaces it
-            if ack_msg:
-                try:
-                    await ack_msg.delete()
-                except Exception:
-                    pass
+            # Clean up agent display messages
+            await self._cleanup_agent_messages(chat_id, ctx, user.id)
 
             # Send the actual response
             await self._send_response(chat_id, ctx, response)
@@ -940,73 +1019,73 @@ class NexusTelegramBot:
         finally:
             self._processing[user.id] = False
             self._feedback_emitters.pop(user.id, None)
-            self._step_msg_ids.pop(user.id, None)
-            # Clean up ack message on any exit
-            if ack_msg:
-                try:
-                    await ack_msg.delete()
-                except Exception:
-                    pass
+            self._status_msg_ids.pop(user.id, None)
+            self._agent_displays.pop(user.id, None)
 
-    # ─── Live Terminal Consumer ──────────────────────
+    # ─── Live Status Consumer ─────────────────────────────
 
-    async def _terminal_consumer(self, chat_id, ctx, user_id, queue, step_log):
-        """Async consumer: reads events from queue and live-edits the terminal message."""
+    async def _status_consumer(self, chat_id, ctx, user_id, queue, step_log):
+        """Async consumer: reads events from queue and live-edits the status message.
+        Also handles AGENT_START/AGENT_DONE events for per-agent displays."""
         last_edit_time = 0
-        MIN_EDIT_INTERVAL = 0.8  # Throttle edits to avoid rate limits
+        MIN_EDIT_INTERVAL = 2.0  # Throttle edits to avoid rate limits (2s = 30/min)
 
         while True:
             try:
-                # Wait for next event with timeout
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
 
-                # Sentinel = done
                 if event is None:
                     break
 
-                # Throttle edits
+                # Handle agent events — create/update per-agent messages
+                if event.type in (FeedbackType.AGENT_START, FeedbackType.AGENT_DONE,
+                                  FeedbackType.AGENT_PROGRESS):
+                    await self._handle_agent_event(chat_id, ctx, user_id, event)
+
+                # Throttle edits for the main status message
                 now = asyncio.get_event_loop().time()
                 if now - last_edit_time < MIN_EDIT_INTERVAL:
-                    # Still update the step_log via queue, but skip Telegram edit
                     continue
 
-                # Live-update the terminal block
-                await self._update_terminal_block(chat_id, ctx, user_id, step_log)
+                await self._update_live_status(chat_id, ctx, user_id, step_log)
                 last_edit_time = now
 
             except asyncio.TimeoutError:
-                # No new events for 30s — just keep waiting
                 continue
             except Exception as e:
-                log.debug(f"Terminal consumer error: {e}")
+                log.debug(f"Status consumer error: {e}")
                 continue
 
-    # ─── Terminal-style Step Display ──────────────────
+    # ─── Live Status Display ─────────────────────────────
 
-    async def _format_terminal_block(self, steps):
-        """Format step log as a terminal-style code block."""
+    async def _format_live_status(self, steps):
+        """Format step log as frameless live status with command header."""
         if not steps:
             return ""
 
-        lines = ["```\n┌─ Nexus Terminal ─────────────┐"]
-        for step in steps[-8:]:  # show last 8 steps max
+        header = "⚡ /background · /show\n"
+        lines = []
+        for step in steps[-8:]:
             icon = STEP_ICONS.get(step.type, "·")
-            msg = step.message[:35]
+            msg = step.message[:40]
             if step.detail:
-                detail = step.detail[:25]
-                lines.append("│ {} {}: {}".format(icon, msg, detail))
+                detail = step.detail[:30]
+                lines.append(f"{icon} {msg}: {detail}")
             else:
-                lines.append("│ {} {}".format(icon, msg))
-        lines.append("└──────────────────────────────┘```")
-        return "\n".join(lines)
+                lines.append(f"{icon} {msg}")
 
-    async def _update_terminal_block(self, chat_id, ctx, user_id, steps):
-        """Send or edit the terminal block message."""
-        text = await self._format_terminal_block(steps)
+        if not lines:
+            return ""
+
+        return header + "\n".join(lines)
+
+    async def _update_live_status(self, chat_id, ctx, user_id, steps):
+        """Send or edit the live status message."""
+        text = await self._format_live_status(steps)
         if not text:
             return
 
-        msg_id = self._step_msg_ids.get(user_id)
+        msg_id = self._status_msg_ids.get(user_id)
 
         try:
             if msg_id:
@@ -1014,46 +1093,124 @@ class NexusTelegramBot:
                     chat_id=chat_id,
                     message_id=msg_id,
                     text=text,
-                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
             else:
                 msg = await ctx.bot.send_message(
                     chat_id=chat_id,
                     text=text,
-                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
-                self._step_msg_ids[user_id] = msg.message_id
+                self._status_msg_ids[user_id] = msg.message_id
         except Exception:
             pass
 
-    async def _finalize_terminal_block(self, chat_id, ctx, user_id, steps):
-        """Final update to terminal block showing completion."""
+    async def _finalize_live_status(self, chat_id, ctx, user_id, steps):
+        """Final update to live status showing completion."""
         steps.append(FeedbackEvent(
             type=FeedbackType.DONE,
             message="Fertig",
             detail="",
-            icon="🎯",
+            icon="✨",
             step=steps[-1].step + 1 if steps else 0,
         ))
-        text = await self._format_terminal_block(steps)
+        text = await self._format_live_status(steps)
 
-        msg_id = self._step_msg_ids.get(user_id)
+        msg_id = self._status_msg_ids.get(user_id)
         try:
             if msg_id:
                 await ctx.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=msg_id,
                     text=text,
-                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
             else:
                 await ctx.bot.send_message(
                     chat_id=chat_id,
                     text=text,
-                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
         except Exception:
             pass
+
+    # ─── Per-Agent Display ─────────────────────────────────
+
+    async def _handle_agent_event(self, chat_id, ctx, user_id, event):
+        """Handle AGENT_START/AGENT_PROGRESS/AGENT_DONE events for per-agent displays."""
+        if self._background_mode.get(user_id, False):
+            return
+
+        department = event.department
+        if not department:
+            return
+
+        displays = self._agent_displays.setdefault(user_id, {})
+        icon = DEPT_ICONS.get(department, "🤖")
+        name = DEPT_NAMES.get(department, department.capitalize())
+
+        if event.type == FeedbackType.AGENT_START:
+            state = AgentDisplayState(
+                department=department,
+                display_name=name,
+                model_name=event.detail or event.model_name or "",
+                icon=icon,
+                status="running",
+                start_time=time.time(),
+            )
+            state.steps.append("Gestartet...")
+            displays[department] = state
+
+            text = self._format_agent_display(state)
+            try:
+                msg = await ctx.bot.send_message(chat_id=chat_id, text=text)
+                state.message_id = msg.message_id
+            except Exception:
+                pass
+
+        elif event.type == FeedbackType.AGENT_PROGRESS:
+            state = displays.get(department)
+            if not state:
+                return
+            progress_text = event.message[:60]
+            if event.detail:
+                progress_text += f": {event.detail[:40]}"
+            state.steps.append(progress_text)
+            state.steps = state.steps[-5:]
+
+            text = self._format_agent_display(state)
+            if state.message_id:
+                try:
+                    await ctx.bot.edit_message_text(
+                        chat_id=chat_id, message_id=state.message_id, text=text)
+                except Exception:
+                    pass
+
+        elif event.type == FeedbackType.AGENT_DONE:
+            state = displays.get(department)
+            if not state:
+                return
+            elapsed = event.elapsed if event.elapsed > 0 else (time.time() - state.start_time)
+            success = "✅" in event.icon
+            state.status = "completed" if success else "failed"
+            status_text = f"✅ {elapsed:.1f}s" if success else "❌ Fehlgeschlagen"
+            state.steps.append(status_text)
+
+            text = self._format_agent_display(state)
+            if state.message_id:
+                try:
+                    await ctx.bot.edit_message_text(
+                        chat_id=chat_id, message_id=state.message_id, text=text)
+                except Exception:
+                    pass
+
+    def _format_agent_display(self, state: AgentDisplayState) -> str:
+        """Format a single agent's display as plain text with tree lines."""
+        lines = [f"{state.icon} {state.display_name} ({state.model_name})"]
+        for i, step in enumerate(state.steps):
+            prefix = "├" if i < len(state.steps) - 1 else "└"
+            lines.append(f"{prefix} {step}")
+        return "\n".join(lines)
+
+    async def _cleanup_agent_messages(self, chat_id, ctx, user_id):
+        """Clean up agent display tracking after processing."""
+        self._agent_displays.pop(user_id, None)
 
     # ─── Helpers ────────────────────────────────────────
 

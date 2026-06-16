@@ -269,7 +269,8 @@ class AgentTeam:
             task_description: The task to handle
             context: Additional context
             complexity: Task complexity (determines agent count and departments)
-            progress_callback: Called when an agent completes (for intermediate results)
+            progress_callback: Called with (event_type, dept, task) for lifecycle events.
+                event_type: "agent_start" before task begins, "agent_done" after completion.
 
         Returns:
             List of completed TeamTasks
@@ -288,8 +289,11 @@ class AgentTeam:
             future_to_dept = {}
             for dept in departments:
                 dept_config = self.DEPARTMENTS.get(dept, self.DEPARTMENTS["research"])
-                # Create task-specific prompt with department context
                 task_prompt = self._build_parallel_prompt(task_description, dept, dept_config, context)
+
+                # Emit agent_start before submitting
+                if progress_callback:
+                    progress_callback("agent_start", dept, None)
 
                 future = executor.submit(
                     self._execute_department_task,
@@ -308,7 +312,7 @@ class AgentTeam:
                     completed_count += 1
 
                     if progress_callback:
-                        progress_callback(completed_count, len(departments), dept, task)
+                        progress_callback("agent_done", dept, task)
 
                     log.info(f"Parallel task completed: {dept} in {task.elapsed:.1f}s")
                 except Exception as e:
@@ -322,6 +326,8 @@ class AgentTeam:
                         elapsed=0,
                     )
                     results.append(failed_task)
+                    if progress_callback:
+                        progress_callback("agent_done", dept, failed_task)
 
         # Synthesize results if needed
         if need_synthesis and len(results) > 1:
