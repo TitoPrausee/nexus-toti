@@ -1,14 +1,19 @@
 """
-NEXUS v8.2 — Agent Team System
+NEXUS v9.2 — Agent Team System
 Unternehmen-Struktur: CEO, Research, Engineering, Creative, Operations.
+v9.2: Parallel delegation, complexity-based agent count, agent profiles.
+
 Each department uses specialist models via Ollama Cloud.
 Self-improvement: if Nexus can't do something, it delegates or researches how to.
+Parallel execution: complex tasks are split across N agents using ThreadPoolExecutor.
 """
 
 import logging
 import time
+import json
 from typing import Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from nexus.core.llm_client import LLMClient, Message, LLMResponse
 
@@ -25,22 +30,25 @@ class TeamTask:
     status: str = "pending"  # pending, in_progress, completed, failed
     result: str = ""
     elapsed: float = 0.0
+    complexity: str = "moderate"  # simple, moderate, complex, critical
 
 
 class AgentTeam:
     """
     Unternehmen-artige Agent-Organisation.
-    
+
     Abteilungen:
     - CEO: Priorisiert, entscheidet, delegiert
     - Research: Recherchiert, analysiert, findet Fakten
     - Engineering: Codet, baut, fixt, deployed
     - Creative: Design, Text, Präsentationen
     - Operations: Verwaltung, Monitoring, Planung
-    
-    Self-Improvement Loop:
-    Wenn Nexus etwas nicht kann → Research rechschiert Lösung → 
-    Engineering baut es → Operations integriert es.
+
+    v9.2 additions:
+    - classify_complexity(): determines how many agents to spawn
+    - delegate_parallel(): runs N agents concurrently
+    - synthesize_results(): CEO merges parallel results
+    - Agent profiles from YAML (loaded dynamically)
     """
 
     DEPARTMENTS = {
@@ -80,21 +88,126 @@ class AgentTeam:
         },
     }
 
+    # Complexity → agent count and departments mapping
+    COMPLEXITY_CONFIG = {
+        "simple": {
+            "agents": 1,
+            "departments": ["operations"],  # fast, single agent
+            "synthesis": False,
+        },
+        "moderate": {
+            "agents": 2,
+            "departments": ["research", "engineering"],
+            "synthesis": False,
+        },
+        "complex": {
+            "agents": 3,
+            "departments": ["research", "engineering", "creative"],
+            "synthesis": True,
+        },
+        "critical": {
+            "agents": 4,
+            "departments": ["ceo", "research", "engineering", "operations"],
+            "synthesis": True,
+        },
+    }
+
     def __init__(self, llm: LLMClient, config: dict = None):
         self.llm = llm
         self.config = config or {}
         self._task_history = []  # type: List[TeamTask]
         self._task_counter = 0
+        self._max_workers = self.config.get("max_parallel_workers", 4)
+
+        # Load agent profiles from YAML if available
+        self._profiles_loaded = False
+        self._load_profiles()
 
     def _next_task_id(self) -> str:
         self._task_counter += 1
         return f"T{self._task_counter:04d}"
 
+    def _load_profiles(self):
+        """Load agent profiles from data/agents/ directory."""
+        try:
+            from nexus.core.agent_profiles import load_all_profiles
+            profiles = load_all_profiles()
+            if profiles:
+                # Override hardcoded departments with profile data
+                for name, profile in profiles.items():
+                    dept_name = name.lower()
+                    if dept_name in self.DEPARTMENTS:
+                        self.DEPARTMENTS[dept_name]["name"] = profile.get("name", dept_name.capitalize())
+                        self.DEPARTMENTS[dept_name]["role"] = profile.get("role", self.DEPARTMENTS[dept_name]["role"])
+                        self.DEPARTMENTS[dept_name]["model"] = profile.get("model", self.DEPARTMENTS[dept_name]["model"])
+                        # Prepend custom system prompt from profile
+                        custom_prompt = profile.get("system_prompt", "")
+                        if custom_prompt:
+                            self.DEPARTMENTS[dept_name]["role"] = custom_prompt
+                    else:
+                        # New department from profile
+                        self.DEPARTMENTS[dept_name] = {
+                            "name": profile.get("name", name),
+                            "model": profile.get("model", "default"),
+                            "role": profile.get("role", f"Spezialist fuer {name}"),
+                            "max_turns": profile.get("max_turns", 3),
+                        }
+                self._profiles_loaded = True
+                log.info(f"Loaded {len(profiles)} agent profiles")
+        except ImportError:
+            log.debug("agent_profiles module not available, using hardcoded departments")
+        except Exception as e:
+            log.warning(f"Failed to load agent profiles: {e}")
+
+    def classify_complexity(self, task_description: str, context: str = "",
+                            routing_complexity: str = "moderate") -> str:
+        """
+        Classify task complexity to determine how many agents to spawn.
+
+        Uses routing decision complexity as a base, then refines based on
+        task characteristics. Returns: simple, moderate, complex, critical.
+        """
+        # Start with routing decision
+        complexity = routing_complexity
+
+        # Refine based on task description
+        msg_lower = task_description.lower()
+        word_count = len(task_description.split())
+
+        # Upgrade complexity for multi-part tasks
+        multi_part_markers = ["und", " und ", "außerdem", "zusätzlich", "gleichzeitig",
+                             "auch", "dazu", "sowie", "both", "also", "additionally"]
+        multi_part_count = sum(1 for m in multi_part_markers if m in msg_lower)
+
+        # Upgrade if multiple domains are involved
+        domain_keywords = {
+            "code": 0, "programmier": 0, "implementier": 0, "refactor": 0,
+            "recherchier": 1, "analysier": 1, "vergleiche": 1, "such": 1,
+            "design": 2, "layout": 2, "kreativ": 2, "präsentation": 2,
+            "deploy": 0, "server": 0, "konfigurier": 3, "monitoring": 3,
+        }
+        domains_hit = set()
+        for keyword, domain in domain_keywords.items():
+            if keyword in msg_lower:
+                domains_hit.add(domain)
+
+        # Adjust complexity
+        if len(domains_hit) >= 3 or multi_part_count >= 2:
+            complexity = "critical"
+        elif len(domains_hit) >= 2 or multi_part_count >= 1 or word_count > 40:
+            if complexity == "simple":
+                complexity = "moderate"
+            elif complexity == "moderate":
+                complexity = "complex"
+
+        return complexity
+
     def delegate(self, task_description: str, department: str = "auto",
-                 context: str = "") -> TeamTask:
+                 context: str = "", complexity: str = None) -> TeamTask:
         """
         Delegate a task to a department.
         If department='auto', CEO decides which department handles it.
+        If complexity is set, may trigger parallel delegation.
         """
         task_id = self._next_task_id()
 
@@ -109,6 +222,7 @@ class AgentTeam:
             task_id=task_id,
             description=task_description,
             department=department,
+            complexity=complexity or "moderate",
         )
         task.status = "in_progress"
         start = time.time()
@@ -140,17 +254,213 @@ class AgentTeam:
         self._task_history.append(task)
         log.info(f"Team task {task_id} -> {dept['name']}: {task.status} ({task.elapsed:.1f}s)")
 
+        # Update agent profile performance metrics
+        self._update_profile_performance(department, task)
+
+        return task
+
+    def delegate_parallel(self, task_description: str, context: str = "",
+                          complexity: str = "moderate",
+                          progress_callback=None) -> List[TeamTask]:
+        """
+        Delegate a task to multiple departments in parallel.
+
+        Args:
+            task_description: The task to handle
+            context: Additional context
+            complexity: Task complexity (determines agent count and departments)
+            progress_callback: Called when an agent completes (for intermediate results)
+
+        Returns:
+            List of completed TeamTasks
+        """
+        config = self.COMPLEXITY_CONFIG.get(complexity, self.COMPLEXITY_CONFIG["moderate"])
+        departments = config["departments"][:config["agents"]]
+        need_synthesis = config["synthesis"]
+
+        log.info(f"Parallel delegation: complexity={complexity}, departments={[self.DEPARTMENTS.get(d, {}).get('name', d) for d in departments]}")
+
+        results = []
+        completed_count = 0
+
+        with ThreadPoolExecutor(max_workers=min(config["agents"], self._max_workers)) as executor:
+            # Submit all tasks
+            future_to_dept = {}
+            for dept in departments:
+                dept_config = self.DEPARTMENTS.get(dept, self.DEPARTMENTS["research"])
+                # Create task-specific prompt with department context
+                task_prompt = self._build_parallel_prompt(task_description, dept, dept_config, context)
+
+                future = executor.submit(
+                    self._execute_department_task,
+                    task_description=task_description,
+                    department=dept,
+                    custom_prompt=task_prompt,
+                )
+                future_to_dept[future] = dept
+
+            # Collect results as they come in
+            for future in as_completed(future_to_dept):
+                dept = future_to_dept[future]
+                try:
+                    task = future.result()
+                    results.append(task)
+                    completed_count += 1
+
+                    if progress_callback:
+                        progress_callback(completed_count, len(departments), dept, task)
+
+                    log.info(f"Parallel task completed: {dept} in {task.elapsed:.1f}s")
+                except Exception as e:
+                    log.error(f"Parallel task failed: {dept}: {e}")
+                    failed_task = TeamTask(
+                        task_id=self._next_task_id(),
+                        description=task_description,
+                        department=dept,
+                        status="failed",
+                        result=f"Fehler: {e}",
+                        elapsed=0,
+                    )
+                    results.append(failed_task)
+
+        # Synthesize results if needed
+        if need_synthesis and len(results) > 1:
+            synthesis = self.synthesize_results(task_description, results)
+            # Add synthesis as a final result
+            results.append(synthesis)
+
+        return results
+
+    def _build_parallel_prompt(self, task_description: str, department: str,
+                               dept_config: dict, context: str) -> str:
+        """Build a department-specific prompt for parallel execution."""
+        dept_name = dept_config.get("name", department.capitalize())
+        dept_role = dept_config.get("role", "")
+
+        # Research-specific prompt
+        if department == "research":
+            return (
+                f"Du bist {dept_name} bei Nexus. {dept_role}\n"
+                f"Fokus: Fakten sammeln, Quellen prüfen, Informationen strukturieren.\n"
+                f"Antworte direkt und ergebnisorientiert.\n"
+                f"Aufgabe: {task_description}\n"
+            )
+        # Engineering-specific prompt
+        elif department == "engineering":
+            return (
+                f"Du bist {dept_name} bei Nexus. {dept_role}\n"
+                f"Fokus: Konkrete Lösung implementieren, Code-Beispiele, technische Details.\n"
+                f"Antworte direkt und ergebnisorientiert.\n"
+                f"Aufgabe: {task_description}\n"
+            )
+        # Creative-specific prompt
+        elif department == "creative":
+            return (
+                f"Du bist {dept_name} bei Nexus. {dept_role}\n"
+                f"Fokus: Kreative Perspektive, Design-Ideen, alternative Ansätze.\n"
+                f"Antworte direkt und ergebnisorientiert.\n"
+                f"Aufgabe: {task_description}\n"
+            )
+        # CEO prompt (for critical tasks)
+        elif department == "ceo":
+            return (
+                f"Du bist {dept_name} bei Nexus. {dept_role}\n"
+                f"Fokus: Strategische Entscheidung, Priorisierung, Risikobewertung.\n"
+                f"Antworte direkt und ergebnisorientiert.\n"
+                f"Aufgabe: {task_description}\n"
+            )
+        # Default prompt
+        else:
+            return (
+                f"Du bist {dept_name} bei Nexus. {dept_role}\n"
+                f"Antworte direkt und ergebnisorientiert.\n"
+                f"Aufgabe: {task_description}\n"
+            )
+
+    def _execute_department_task(self, task_description: str, department: str,
+                                  custom_prompt: str = "") -> TeamTask:
+        """Execute a single department task (for ThreadPoolExecutor)."""
+        dept = self.DEPARTMENTS.get(department, self.DEPARTMENTS["research"])
+        task_id = self._next_task_id()
+        task = TeamTask(
+            task_id=task_id,
+            description=task_description,
+            department=department,
+            complexity="parallel",
+        )
+        task.status = "in_progress"
+        start = time.time()
+
+        messages = [
+            Message("system", custom_prompt or f"Du bist {dept['name']}. {dept['role']}"),
+            Message("user", task_description),
+        ]
+
+        response = self.llm.chat(messages, model_key=dept["model"])
+
+        if response.success:
+            task.result = response.content
+            task.status = "completed"
+        else:
+            task.result = f"Fehler: {response.error}"
+            task.status = "failed"
+
+        task.elapsed = time.time() - start
+        self._task_history.append(task)
+        self._update_profile_performance(department, task)
+
+        return task
+
+    def synthesize_results(self, original_task: str, results: List[TeamTask]) -> TeamTask:
+        """
+        CEO synthesizes parallel results into a coherent final answer.
+        Called after all parallel agents have completed.
+        """
+        start = time.time()
+
+        # Build synthesis prompt with all results
+        result_parts = []
+        for r in results:
+            if r.status == "completed":
+                dept_name = self.DEPARTMENTS.get(r.department, {}).get("name", r.department)
+                result_parts.append(f"**{dept_name}**:\n{r.result[:1500]}")
+            else:
+                result_parts.append(f"**{r.department}** (fehlgeschlagen): {r.result[:500]}")
+
+        results_text = "\n\n".join(result_parts)
+
+        messages = [
+            Message("system",
+                "Du bist der CEO bei Nexus. Synthetisiere die Ergebnisse deiner Teammitglieder "
+                "zu einer klaren, zusammenhängenden Antwort. Keine Wiederholungen, kein Fülltext. "
+                "Fasse die wichtigsten Punkte zusammen und ergänze wo nötig."),
+            Message("user", f"Original-Aufgabe: {original_task}\n\nTeam-Ergebnisse:\n{results_text}"),
+        ]
+
+        response = self.llm.chat(messages, model_key="orchestrator")
+
+        task = TeamTask(
+            task_id=self._next_task_id(),
+            description=f"Synthese: {original_task[:100]}",
+            department="ceo",
+            status="completed" if response.success else "failed",
+            result=response.content if response.success else f"Synthese-Fehler: {response.error}",
+            elapsed=time.time() - start,
+            complexity="synthesis",
+        )
+
+        self._task_history.append(task)
         return task
 
     def research_and_build(self, task_description: str, context: str = "") -> str:
         """
         Self-improvement loop: Research how to do something, then build it.
-        
+
         1. CEO: Classify and plan
         2. Research: Find out how (if unknown)
         3. Engineering: Build it
         4. Operations: Verify/report
-        
+
         Returns combined result.
         """
         results = []
@@ -214,6 +524,18 @@ class AgentTeam:
                     return dept
 
         return "research"  # safe default
+
+    def _update_profile_performance(self, department: str, task: TeamTask):
+        """Update agent profile performance metrics after a task completes."""
+        try:
+            from nexus.core.agent_profiles import update_performance
+            update_performance(
+                department,
+                success=(task.status == "completed"),
+                elapsed=task.elapsed,
+            )
+        except (ImportError, Exception) as e:
+            log.debug(f"Profile performance update skipped for {department}: {e}")
 
     def get_team_status(self) -> str:
         """Get current team status summary."""

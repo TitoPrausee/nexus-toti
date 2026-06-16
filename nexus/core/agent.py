@@ -1,14 +1,15 @@
 """
-NEXUS v9.0 — Agent Core
+NEXUS v9.2 — Agent Core
 Pair architecture: Router/Worker/Critic for efficient Ollama Cloud usage.
-Personalization: learns about users through natural conversation.
-Hermes-inspired: iteration budget, think-block stripping, tool result budgets.
-Skills injection: loads skill summary into system prompt for LLM awareness.
+v9.2: Fast Response Layer (QuickResponder + Response Cache), parallel agents.
 
 Architecture:
 - Router (gemini-3-flash): classifies intent, answers trivial, routes complex
+- QuickResponder: instant template ack + hybrid fast-model ack (< 4s first response)
+- Response Cache: instant answers for recurring questions (< 10ms)
 - Worker (kimi-k2.6 or specialist): handles actual tasks
 - Critic (gemma4, optional): quality check for critical responses
+- AgentTeam: parallel delegation with complexity-based agent count
 """
 
 import re
@@ -30,6 +31,8 @@ from nexus.core.feedback import FeedbackEmitter, FeedbackType
 from nexus.core.pair_router import PairRouter, IntentType, RoutingDecision
 from nexus.core.personalization import PersonalizationEngine
 from nexus.core.agent_team import AgentTeam
+from nexus.core.fast_response import QuickResponder, AckResult
+from nexus.core.response_cache import ResponseCache
 from nexus.soul import SoulEngine
 
 log = logging.getLogger("nexus.agent")
@@ -50,7 +53,7 @@ class IterationBudget:
     """Track total API calls, max iterations, and allow one grace call.
     Prevents runaway tool loops while allowing final summary.
     """
-    def __init__(self, max_calls: int = 15, max_iterations: int = 10, grace_calls: int = 1):
+    def __init__(self, max_calls: int = 6, max_iterations: int = 6, grace_calls: int = 1):
         self.max_calls = max_calls
         self.max_iterations = max_iterations
         self.grace_calls = grace_calls
@@ -98,8 +101,8 @@ class IterationBudget:
 
 # ─── Tool Result Budget ──────────────────────────────
 
-MAX_TOOL_RESULT_CHARS = 8000  # Max chars per tool result fed back to LLM
-MAX_TOTAL_TOOL_CHARS = 24000   # Max total tool result chars per turn
+MAX_TOOL_RESULT_CHARS = 4000  # Max chars per tool result fed back to LLM (was 8000)
+MAX_TOTAL_TOOL_CHARS = 16000   # Max total tool result chars per turn (was 24000)
 
 
 def _short_id(sid: str) -> str:
@@ -172,8 +175,8 @@ class NexusAgent:
         perf = self.config.get("performance", {})
         self.max_tool_calls = perf.get("max_tool_calls_per_turn", 15)
         self.max_tokens_per_turn = perf.get("max_tokens_per_turn", 8000)
-        self.max_duplicate_calls = perf.get("max_duplicate_calls", 3)
-        self.max_chain_repeats = perf.get("max_chain_repeats", 2)
+        self.max_duplicate_calls = perf.get("max_duplicate_calls", 2)
+        self.max_chain_repeats = perf.get("max_chain_repeats", 1)
 
         # State
         self._tool_call_count = 0
@@ -192,6 +195,10 @@ class NexusAgent:
 
         # v8.2: Agent Team (organization-structured delegation)
         self.team = AgentTeam(self.llm, self.config.get("team", {}))
+
+        # v9.2: Fast Response Layer
+        self.quick_responder = QuickResponder(self.llm, self.config.get("fast_response", {}))
+        self.response_cache = ResponseCache(self.config.get("response_cache", {}))
 
         # v8.1: Onboarding hints tracking (per user)
         self._shown_hints: dict = {}  # user_id -> set of hint IDs
@@ -242,39 +249,11 @@ class NexusAgent:
         parts.append(
             f"\n{self._no_meta_rule}\n"
             f"{self._security_rule}\n\n"
-            f"{skills_summary}\n\n"
-            f"Deine Faehigkeiten — du KANNST all das, nutze es:\n"
-            f"- terminal: Shell-Befehle ausfuehren (git, pip, curl, gh, python, etc.)\n"
-            f"- web_search: Im Internet suchen (DuckDuckGo)\n"
-            f"- web_fetch: Webseiten laden und lesen\n"
-            f"- file_read/write/search: Dateien lesen, schreiben, durchsuchen\n"
-            f"- code_exec: Python-Code ausfuehren\n"
-            f"- delegation: Aufgaben an Team-Abteilungen delegieren (Research, Engineering, Creative, Operations)\n"
-            f"- memory: Fakten ueber Nutzer speichern und abrufen\n"
-            f"- calculator: Berechnungen\n\n"
-            f"WENN dich jemand fragt ob du etwas kannst, pruefe OB EIN TOOL DAFUER EXISTIERT.\n"
-            f"Beispiele:\n"
-            f"- 'Kannst du auf GitLab zugreifen?' -> JA, via terminal (git clone, gh api, curl) oder delegation an Engineering\n"
-            f"- 'Kannst du recherchieren?' -> JA, via web_search oder delegation an Research\n"
-            f"- 'Kannst du code schreiben?' -> JA, via file_write + code_exec oder delegation an Engineering\n"
-            f"- 'Kannst du mir Daten besorgen?' -> JA, via web_search + web_fetch\n"
-            f"NIE 'Ich kann nicht' sagen wenn ein Tool dafuer existiert. Im Zweifel: AUSPROBIEREN.\n\n"
-            f"Du hast folgende Werkzeuge zur Verfuegung:\n{tool_descs}\n\n"
-            f"Werkzeug-Aufruf-Format (verwende DIES, wenn du ein Werkzeug nutzen willst):\n"
-            f"{TOOL_START}JSON_OBJECT{TOOL_END}\n\n"
-            f"Beispiel: {TOOL_START}"
-            + '{"tool": "terminal", "command": "ls -la"}'
-            + f"{TOOL_END}\n\n"
-            f"Regeln:\n"
-            f"- Verwende Werkzeuge wenn sie helfen, nicht aus Spass\n"
-            f"- Beende Werkzeug-Aufrufe mit einer natuerlichen Antwort\n"
-            f"- Wenn du eine Aufgabe delegieren willst, nutze 'delegation'\n"
-            f"- Wenn du etwas NICHT WEISST oder NICHT KANNST: Recherche es (web_search) oder delegiere an Research\n"
-            f"- Wenn etwas gebaut/erstellt werden muss: delegiere an Engineering oder mode=full_team\n"
-            f"- DU BIST SELBSTSTAENDIG: Nie 'das kann ich nicht' - finde die Loesung\n"
-            f"- Wenn ein Werkzeug fehlschlaegt, versuche es ANDERS, nicht nochmal gleich\n"
-            f"- Max {self.max_duplicate_calls}x derselbe Aufruf pro Konversation\n"
-            f"- Antworte auf Deutsch wenn der Nutzer Deutsch spricht, sonst in der Sprache des Nutzers\n"
+            f"Tools: terminal, file_read, file_write, file_search, web_search, web_fetch, code_exec, delegation, memory, calculator, time\n"
+            f"Format: {TOOL_START}"
+            + '{"tool": "name", ...args}'
+            + f"{TOOL_END}\n"
+            f"Regeln: Deutsch wenn Nutzer Deutsch. Nie 'Ich kann nicht' — Tools nutzen. Max {self.max_duplicate_calls}x gleicher Aufruf. Fehler → anderer Ansatz, nicht wiederholen.\n"
         )
 
         return "\n\n".join(parts)
@@ -309,7 +288,7 @@ class NexusAgent:
         """
         try:
             from nexus.core.skill_autocreator import get_skills_summary
-            return get_skills_summary(max_skills=200)
+            return get_skills_summary(max_skills=30)
         except Exception as e:
             log.debug(f"Failed to load skills summary: {e}")
             return ""
@@ -317,16 +296,20 @@ class NexusAgent:
     # ─── Main Entry Point (Pair Architecture) ──────────
 
     def process(self, user_message: str, user_id: str = None,
-                feedback: FeedbackEmitter = None, platform: str = "telegram") -> str:
+                feedback: FeedbackEmitter = None, platform: str = "telegram",
+                quick_callback=None) -> str:
         """
         Main entry point. Routes through Pair architecture.
 
         Flow:
+        0. Response cache check — instant answers for recurring questions (< 10ms)
         1. Personalization check (first contact?)
-        2. Route intent (trivial → direct answer, complex → Worker)
-        3. Execute (tools, LLM call, etc.)
-        4. Optionally Critique (critical responses)
-        5. Update personalization, memory, soul
+        2. Quick ack — send immediate acknowledgment (< 4s)
+        3. Route intent (trivial → direct answer, complex → Worker)
+        4. Execute (tools, LLM call, etc.)
+        5. Optionally Critique (critical responses)
+        6. Cache successful responses for future fast answers
+        7. Update personalization, memory, soul
         """
         self._tool_call_count = 0
         self._tool_call_hashes = []
@@ -344,6 +327,17 @@ class NexusAgent:
         if feedback:
             feedback.thinking("Nachricht empfangen — analysiere...")
 
+        # ── 0. Response cache check ──
+        # Instant answers for recurring questions (< 10ms, no LLM call)
+        cached = self.response_cache.lookup(user_message)
+        if cached and cached.hits >= 2:
+            elapsed = time.time() - start_time
+            log.info(f"Cache HIT for '{user_message[:50]}' ({cached.hits} hits, {elapsed*1000:.0f}ms)")
+            if feedback:
+                feedback.done(f"Aus Cache ({elapsed*1000:.0f}ms)")
+            self._is_processing = False
+            return strip_think_blocks(cached.answer)
+
         # ── 1. Personalization ──
         if user_id:
             pers_result = self.personalization.process_response(user_id, user_message)
@@ -355,7 +349,17 @@ class NexusAgent:
         routing = self.router.route(user_message, context_summary)
 
         if feedback:
-            feedback.progress(f"Intent: {routing.intent}", detail=f"needs_worker={routing.needs_worker}")
+            feedback.progress(f"Intent: {routing.intent}", detail=f"needs_worker={routing.needs_worker}, complexity={routing.complexity}")
+
+        # ── 2b. Quick ack — send immediate acknowledgment ──
+        # For non-trivial queries, send a quick ack so the user sees
+        # a response within < 4 seconds
+        if routing.needs_worker and quick_callback:
+            ack = self.quick_responder.generate_ack(user_message, routing, callback=quick_callback)
+            if ack.text:
+                quick_callback(ack.text)
+                if feedback:
+                    feedback.progress("Schnell-Ack gesendet", detail=ack.text[:60])
 
         # ── 3. Trivial → direct answer ──
         if not routing.needs_worker and routing.router_response:
@@ -559,6 +563,13 @@ class NexusAgent:
         # Auto-create skills from successful multi-step workflows
         if _tool_calls_this_turn:
             self._auto_create_skill(final_response, _tool_calls_this_turn, user_message)
+
+        # ── 7. Cache response for recurring questions ──
+        # Only cache substantive responses (not trivial acks)
+        importance = 0.3 if routing.intent == IntentType.TRIVIAL else 0.6
+        if routing.complexity in ("moderate", "complex", "critical"):
+            importance = 0.8
+        self.response_cache.store(user_message, final_response, importance=importance)
 
         elapsed = time.time() - start_time
         log.info(f"Processed message in {elapsed:.1f}s, {self._tool_call_count} tool calls, budget: {self._iteration_budget.summary()}")
@@ -873,7 +884,8 @@ class NexusAgent:
         task = args.get("task", "")
         specialist = args.get("specialist", "coding")
         context = args.get("context", "")
-        mode = args.get("mode", "single")  # single or full_team
+        mode = args.get("mode", "single")  # single, full_team, or parallel
+        complexity = args.get("complexity", None)  # simple, moderate, complex, critical
 
         # Map old specialist names to team departments
         dept_map = {
@@ -888,13 +900,51 @@ class NexusAgent:
         }
         department = dept_map.get(specialist, "auto")
 
+        # Auto-detect complexity if not specified
+        if complexity is None:
+            complexity = self.team.classify_complexity(task, context)
+
         if mode == "full_team":
             # Full research-and-build cycle: CEO -> Research -> Engineering
             result_text = self.team.research_and_build(task, context)
             return ToolResult(True, result_text, data={"mode": "full_team"})
+        elif mode == "parallel" or (complexity in ("complex", "critical") and mode != "single"):
+            # Parallel delegation based on complexity
+            results = self.team.delegate_parallel(task, context=context, complexity=complexity)
+
+            # Build result from all completed tasks
+            completed = [r for r in results if r.status == "completed"]
+            failed = [r for r in results if r.status == "failed"]
+
+            result_parts = []
+            for r in completed:
+                dept_name = self.team.DEPARTMENTS.get(r.department, {}).get("name", r.department)
+                result_parts.append(f"[{dept_name}] {r.result}")
+
+            # If synthesis was done, use that as the main result
+            synthesis = [r for r in results if r.complexity == "synthesis"]
+            if synthesis and synthesis[0].status == "completed":
+                main_result = synthesis[0].result
+                dept_list = ", ".join(self.team.DEPARTMENTS.get(r.department, {}).get("name", r.department) for r in completed)
+                return ToolResult(True, main_result, data={
+                    "mode": "parallel",
+                    "departments": dept_list,
+                    "complexity": complexity,
+                    "tasks_completed": len(completed),
+                    "tasks_failed": len(failed),
+                })
+
+            result_text = "\n\n".join(result_parts) if result_parts else "Keine Ergebnisse."
+            return ToolResult(True, result_text, data={
+                "mode": "parallel",
+                "departments": [r.department for r in completed],
+                "complexity": complexity,
+                "tasks_completed": len(completed),
+                "tasks_failed": len(failed),
+            })
         else:
             # Single department delegation
-            team_task = self.team.delegate(task, department=department, context=context)
+            team_task = self.team.delegate(task, department=department, context=context, complexity=complexity)
             if team_task.status == "completed":
                 return ToolResult(True, team_task.result, data={
                     "department": team_task.department,
@@ -940,7 +990,8 @@ class NexusAgent:
             self.save_conversation()
         self.memory.end_session()
         self.soul.save()
-        log.info(f"NEXUS shutdown. LLM stats: {self.llm.stats()}")
+        self.response_cache._save()
+        log.info(f"NEXUS shutdown. LLM stats: {self.llm.stats()}, Cache: {self.response_cache.stats()}")
 
     def stats(self):
         return {
@@ -950,6 +1001,7 @@ class NexusAgent:
             "tool_calls_this_turn": self._tool_call_count,
             "soul_relationships": len(self.soul.relationships),
             "iteration_budget": self._iteration_budget.summary() if self._iteration_budget else "N/A",
+            "response_cache": self.response_cache.stats(),
         }
 
     # ─── Session Management (unchanged) ──────────────────

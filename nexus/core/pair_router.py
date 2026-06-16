@@ -44,6 +44,7 @@ class RoutingDecision:
     needs_worker: bool = False
     context_compression: str = "recent"
     max_worker_tokens: int = 4096
+    complexity: str = "simple"  # simple, moderate, complex, critical
 
 
 class PairRouter:
@@ -113,6 +114,7 @@ class PairRouter:
                     router_response=self._trivial_response(msg_lower),
                     needs_worker=False,
                     context_compression="recent",
+                    complexity="simple",
                 )
 
         delegation_hits = sum(1 for kw in self.DELEGATION_KEYWORDS if kw in msg_lower)
@@ -125,6 +127,7 @@ class PairRouter:
                 plan="Delegation task detected",
                 context_compression="summary",
                 max_worker_tokens=self.worker_max_tokens,
+                complexity="complex",
             )
 
         critical_hits = sum(1 for kw in self.CRITICAL_KEYWORDS if kw in msg_lower)
@@ -136,6 +139,7 @@ class PairRouter:
                 model_key="default",
                 context_compression="full",
                 max_worker_tokens=self.worker_max_tokens,
+                complexity="critical",
             )
 
         complex_hits = sum(1 for kw in self.COMPLEX_KEYWORDS if kw in msg_lower)
@@ -143,6 +147,13 @@ class PairRouter:
         is_long = word_count > 25
 
         if complex_hits >= 1:
+            # Determine complexity level based on message characteristics
+            complexity = "moderate"
+            if complex_hits >= 3 or is_long:
+                complexity = "complex"
+            if complex_hits >= 5 or word_count > 50:
+                complexity = "critical"
+
             return RoutingDecision(
                 intent=IntentType.COMPLEX,
                 confidence=0.8,
@@ -150,6 +161,7 @@ class PairRouter:
                 model_key="default",
                 context_compression="summary",
                 max_worker_tokens=self.worker_max_tokens,
+                complexity=complexity,
             )
 
         question_words = {"wie", "warum", "wieso", "was", "wobei", "welche", "wer", "wo", "wann", "womit", "how", "why", "what", "which", "who", "where", "when"}
@@ -166,6 +178,7 @@ class PairRouter:
                 model_key="default",
                 context_compression="summary",
                 max_worker_tokens=self.worker_max_tokens,
+                complexity="moderate",
             )
 
         # Short single-topic messages without keywords -> check trivial patterns first (free, no LLM)
@@ -180,6 +193,7 @@ class PairRouter:
                     router_response=trivial,
                     needs_worker=False,
                     context_compression="recent",
+                    complexity="simple",
                 )
             # No pattern match — still short, ask Router LLM
             # If the LLM can't give a short trivial answer, route to Worker
@@ -193,6 +207,7 @@ class PairRouter:
                     router_response=llm_response,
                     needs_worker=False,
                     context_compression="recent",
+                    complexity="simple",
                 )
             # LLM gave a substantive response — needs Worker
             return RoutingDecision(
@@ -202,6 +217,7 @@ class PairRouter:
                 model_key="default",
                 context_compression="summary",
                 max_worker_tokens=self.worker_max_tokens,
+                complexity="moderate",
             )
 
         # Medium messages without clear intent -> Router decides
@@ -213,36 +229,33 @@ class PairRouter:
             plan="Medium complexity - Worker will handle with standard budget",
             context_compression="recent",
             max_worker_tokens=min(self.worker_max_tokens, 2048),
+            complexity="moderate",
         )
 
     def _classify_and_route_via_llm(self, user_message):
         from datetime import datetime
         now = datetime.now()
-        weekday_de = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"][now.weekday()]
-        month_de = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][now.month]
-        date_str = f"{weekday_de}, {now.day}. {month_de} {now.year}"
-        time_str = now.strftime('%H:%M')
 
         messages = [
             Message("system",
-                f"Du bist Nexus, kein Router. Du sprichst wie ein Mensch beim Kennenlernen - "
-                f"direkt, neugierig, per Du. Keine Floskeln, kein 'Als KI'. "
-                f"WICHTIG: Heute ist {date_str}, {time_str} Uhr. "
-                f"Beantworte Datumsfragen NUR mit diesem Datum, niemals mit deinem Trainingswissen. "
-                f"Bei Smalltalk: Antworte natuerlich kurz, wie ein Kumpel. "
-                f"Bei komplexen Fragen: ROUTE_TO_WORKER"),
+                "Du bist ein Router. Antworte KURZ (max 3 Worte) oder schreibe ROUTE_TO_WORKER bei komplexen Fragen. "
+                "Keine Erklaerungen, keine Einleitungen."),
             Message("user", user_message),
         ]
 
         response = self.llm.chat(
             messages,
             model_key=self.router_model,
-            max_tokens=self.router_max_tokens,
+            max_tokens=min(self.router_max_tokens, 64),  # Router needs max 64 tokens
         )
 
         content = response.content.strip()
 
         if "ROUTE_TO_WORKER" in content:
+            return ""
+
+        # If response is too long for a trivial answer, route to worker
+        if len(content) > 100:
             return ""
 
         return content

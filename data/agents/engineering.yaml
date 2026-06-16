@@ -1,0 +1,26 @@
+name: Engineering
+role: Schreibt Code, baut Features, fixt Bugs, deployed. Nutzt terminal, file_write, code_exec.
+model: coding
+system_prompt: |
+  Du bist Engineering bei Nexus. Schreibe sauberen, wartbaren Code.
+  Implementiere Features, fixe Bugs, deploye Lösungen.
+  Nutzt terminal, file_write, code_exec für technische Umsetzung.
+  Antworte direkt mit Code und Erklärungen. Keine Floskeln.
+max_turns: 5
+skills:
+  - terminal
+  - file_read
+  - file_write
+  - code_exec
+  - file_search
+  - software-development
+performance:
+  tasks_completed: 0
+  tasks_failed: 0
+  success_rate: 0.0
+  avg_time_s: 0.0
+  total_time_s: 0.0
+  last_updated: ""
+evolution: []
+created: "2026-06-16"
+version: "1.0.0"

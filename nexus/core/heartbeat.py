@@ -1,5 +1,5 @@
 """
-NEXUS v8.2 — Heartbeat System
+NEXUS v9.1 — Heartbeat System
 Autonomous health checks, project tracking, and proactive optimization.
 Inspired by Mercury's cron-based self-improvement cycle.
 
@@ -7,7 +7,7 @@ Runs as a background thread, checking:
 1. Ollama Cloud reachability (via Merge Proxy)
 2. Memory health (compression, cleanup)
 3. Project status (from project_tracker)
-4. IQ Drive (proactive improvement suggestions)
+4. Update checking (GitHub releases, every 6 hours)
 
 Usage:
     heartbeat = HeartbeatSystem(agent, config)
@@ -22,7 +22,7 @@ import logging
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 log = logging.getLogger("nexus.heartbeat")
 
@@ -62,12 +62,13 @@ class HeartbeatSystem:
     proactively checks its environment and optimizes itself.
     """
 
-    def __init__(self, agent=None, config: dict = None):
+    def __init__(self, agent=None, config: dict = None, update_callback: Optional[Callable] = None):
         self.agent = agent
         self.config = config or {}
         self.health = HealthStatus()
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self.update_callback = update_callback  # Called when update is available
 
         # Config
         hb_config = self.config.get("heartbeat", {})
@@ -75,6 +76,10 @@ class HeartbeatSystem:
         self.ollama_url = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11435")
         self.data_dir = Path(hb_config.get("data_dir", "data"))
         self.health_file = self.data_dir / "health_status.json"
+
+        # Update checking
+        self._update_check_counter = 0
+        self._update_check_interval = 72  # Every 72 heartbeats ≈ 6 hours (72 * 5min)
 
         # Ensure data dir exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +222,12 @@ class HeartbeatSystem:
                 if self.health.heartbeat_count % 6 == 0:
                     self.cleanup_old_sessions()
 
+                # Check for updates (every ~6 hours)
+                self._update_check_counter += 1
+                if self._update_check_counter >= self._update_check_interval:
+                    self._update_check_counter = 0
+                    self._check_for_updates()
+
                 # Save health status
                 self.save_health_status()
 
@@ -230,6 +241,28 @@ class HeartbeatSystem:
     def get_status(self) -> dict:
         """Get current health status."""
         return self.health.to_dict()
+
+    def _check_for_updates(self):
+        """Check GitHub for new releases and notify via callback if available."""
+        try:
+            from nexus.core.updater import VersionChecker
+            checker = VersionChecker()
+            version_info = checker.check_github_release()
+
+            if version_info.has_update and checker.should_notify(version_info):
+                log.info(f"[HEARTBEAT] Update available: v{version_info.current} → v{version_info.latest}")
+                checker.mark_notified(version_info.latest)
+
+                # Notify via callback (Telegram bot)
+                if self.update_callback:
+                    try:
+                        self.update_callback(version_info)
+                    except Exception as e:
+                        log.error(f"[HEARTBEAT] Update callback failed: {e}")
+            elif not version_info.has_update:
+                log.debug(f"[HEARTBEAT] No update available (v{version_info.current})")
+        except Exception as e:
+            log.error(f"[HEARTBEAT] Update check failed: {e}")
 
     def is_healthy(self) -> bool:
         """Quick health check — is Ollama reachable?"""

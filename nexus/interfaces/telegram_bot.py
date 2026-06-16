@@ -20,8 +20,9 @@ from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    CallbackQueryHandler, ContextTypes, filters
 )
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from nexus.core.agent import NexusAgent
 from nexus.core.session_manager import SessionManager
@@ -116,8 +117,12 @@ class NexusTelegramBot:
         app.add_handler(CommandHandler("data", self._cmd_data))
         app.add_handler(CommandHandler("consent", self._cmd_consent))
         app.add_handler(CommandHandler("team", self._cmd_team))
+        app.add_handler(CommandHandler("agent", self._cmd_agent))
         app.add_handler(CommandHandler("einstellungen", self._cmd_settings))
         app.add_handler(CommandHandler("settings", self._cmd_settings))
+        app.add_handler(CommandHandler("version", self._cmd_version))
+        app.add_handler(CommandHandler("update", self._cmd_update))
+        app.add_handler(CallbackQueryHandler(self._handle_update_callback, pattern=r"^update_"))
         app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, self._handle_message
         ))
@@ -173,6 +178,7 @@ class NexusTelegramBot:
             "Schreib einfach, ich antworte mit Echtzeit\\-Feedback\\.\n\n"
             "🔧 `/status` — Infos ueber mich\n"
             "👥 `/team` — Team\\-Uebersicht\n"
+            "🤖 `/agent` — Agenten\\-Management\\(create/assign/stats/evolve\\)\n"
             "📋 `/data` — Deine Daten einsehen \\(DSGVO Art\\. 15\\)\n"
             "🗑 `/delete` — Deine Daten löschen \\(DSGVO Art\\. 17\\)\n"
             "🔒 `/consent` — Einwilligung verwalten"
@@ -180,12 +186,13 @@ class NexusTelegramBot:
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_status(self, update, ctx):
+        from nexus import __version__
         user = update.effective_user
         processing = self._processing.get(user.id, False)
         status = "⚡ arbeitet" if processing else "✅ bereit"
 
         status_text = (
-            f"⚡ *Nexus v9* — {status}\n\n"
+            f"⚡ *Nexus v{__version__}* — {status}\n\n"
             f"🏗 Architektur: Router \\+ Worker \\+ Team\n"
             f"📡 Sessions: {self.session_manager.stats()['active_sessions']} aktiv\n"
             f"🔒 DSGVO: konform"
@@ -251,6 +258,195 @@ class NexusTelegramBot:
             formatted.append(line)
         await update.message.reply_text("\n".join(formatted), parse_mode=ParseMode.MARKDOWN_V2)
 
+    async def _cmd_agent(self, update, ctx):
+        """Agent management command.
+
+        /agent — List available agents with stats
+        /agent create <name> <role> — Create a new agent
+        /agent assign <name> <skill> — Assign a skill to an agent
+        /agent stats <name> — Show agent performance stats
+        /agent evolve <name> — Trigger LLM-based evolution for an agent
+        """
+        from nexus.core.agent_profiles import (
+            list_profiles, create_profile, assign_skill,
+            get_stats, evolve_profile, load_profile,
+        )
+        from nexus.core.skill_autocreator import list_auto_skills
+
+        user = update.effective_user
+        uid = str(user.id)
+        if self.authorized_users and user.id not in self.authorized_users:
+            await update.message.reply_text("Nicht autorisiert.")
+            return
+
+        parts = (update.message.text or "").strip().split()
+        subcommand = parts[1].lower() if len(parts) > 1 else ""
+
+        # ─── /agent (no subcommand) — list agents ───
+        if not subcommand:
+            profiles = list_profiles()
+            if not profiles:
+                await update.message.reply_text("Keine Agenten-Profile gefunden.")
+                return
+
+            lines = ["🤖 *Nexus Agenten\\-Team*\n"]
+            for p in profiles:
+                name = escape_markdown_v2(p.get("name", "?"))
+                role = escape_markdown_v2(p.get("role", "")[:50])
+                model = escape_markdown_v2(p.get("model", "?"))
+                tasks = p.get("tasks_completed", 0)
+                rate = p.get("success_rate", 0)
+                rate_str = f"{rate:.0%}" if rate > 0 else "neu"
+                skills = p.get("skills_count", 0)
+                lines.append(
+                    f"👤 *{name}* — {role}\n"
+                    f"   Modell: {model} | Tasks: {tasks} | Rate: {rate_str} | Skills: {skills}"
+                )
+
+            lines.append("\n📝 *Befehle:*")
+            lines.append("/agent create \\<name\\> \\<rolle\\>")
+            lines.append("/agent assign \\<name\\> \\<skill\\>")
+            lines.append("/agent stats \\<name\\>")
+            lines.append("/agent evolve \\<name\\>")
+
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        # ─── /agent create <name> <role> ───
+        if subcommand == "create":
+            if len(parts) < 4:
+                await update.message.reply_text(
+                    "Verwendung: `/agent create <name> <rolle>`\n"
+                    "Beispiel: `/agent create code-reviewer Code Reviews und Qualitätssicherung`"
+                )
+                return
+
+            name = parts[2].lower().strip()
+            role = " ".join(parts[3:])
+
+            # Check if profile already exists
+            existing = load_profile(name)
+            if existing:
+                await update.message.reply_text(
+                    f"Agent *{escape_markdown_v2(name)}* existiert bereits\\!"
+                )
+                return
+
+            profile = create_profile(name=name, role=role)
+            await update.message.reply_text(
+                f"✅ Agent *{escape_markdown_v2(profile.name)}* erstellt\\!\n"
+                f"Rolle: {escape_markdown_v2(profile.role)}\n"
+                f"Modell: {escape_markdown_v2(profile.model)}\n\n"
+                f"Weiter: `/agent assign {escape_markdown_v2(name)} <skill>`"
+            )
+            return
+
+        # ─── /agent assign <name> <skill> ───
+        if subcommand == "assign":
+            if len(parts) < 4:
+                # Show available skills
+                skills = list_auto_skills()
+                if skills:
+                    skill_names = [s.get("name", "?") for s in skills[:20]]
+                    await update.message.reply_text(
+                        "Verwendung: `/agent assign <name> <skill>`\n\n"
+                        f"Verfügbare Skills: {', '.join(skill_names[:20])}"
+                    )
+                else:
+                    await update.message.reply_text(
+                        "Verwendung: `/agent assign <name> <skill>`"
+                    )
+                return
+
+            agent_name = parts[2].lower().strip()
+            skill = parts[3].lower().strip()
+
+            success = assign_skill(agent_name, skill)
+            if success:
+                await update.message.reply_text(
+                    f"✅ Skill *{escape_markdown_v2(skill)}* → Agent *{escape_markdown_v2(agent_name)}* zugewiesen"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Agent *{escape_markdown_v2(agent_name)}* nicht gefunden"
+                )
+            return
+
+        # ─── /agent stats <name> ───
+        if subcommand == "stats":
+            if len(parts) < 3:
+                await update.message.reply_text("Verwendung: `/agent stats <name>`")
+                return
+
+            agent_name = parts[2].lower().strip()
+            stats = get_stats(agent_name)
+
+            if not stats:
+                await update.message.reply_text(
+                    f"❌ Agent *{escape_markdown_v2(agent_name)}* nicht gefunden\n"
+                    f"Verfügbar: {', '.join(p.get('name', '?') for p in list_profiles())}"
+                )
+                return
+
+            perf = stats.get("performance", {})
+            lines = [
+                f"📊 *Agent: {escape_markdown_v2(stats['name'])}*\n",
+                f"Rolle: {escape_markdown_v2(stats.get('role', ''))}",
+                f"Modell: {escape_markdown_v2(stats.get('model', ''))}",
+                f"Skills: {', '.join(stats.get('skills', [])[:10]) or 'keine'}",
+                f"Tasks: {perf.get('tasks_completed', 0)} ✅ / {perf.get('tasks_failed', 0)} ❌",
+                f"Erfolgsrate: {perf.get('success_rate', 0):.0%}",
+                f"Ø Zeit: {perf.get('avg_time_s', 0):.1f}s",
+                f"Evolutionen: {stats.get('evolution_count', 0)}",
+            ]
+
+            last_evo = stats.get("last_evolution")
+            if last_evo:
+                lines.append(f"Letzte Evolution: {escape_markdown_v2(last_evo.get('insight', '')[:80])}")
+
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        # ─── /agent evolve <name> ───
+        if subcommand == "evolve":
+            if len(parts) < 3:
+                await update.message.reply_text("Verwendung: `/agent evolve <name>`")
+                return
+
+            agent_name = parts[2].lower().strip()
+            await update.message.reply_text(f"🔄 Starte Evolution für *{escape_markdown_v2(agent_name)}*\\.")
+
+            # Run evolution (may use LLM)
+            result = evolve_profile(agent_name, llm_client=self.agent.llm)
+
+            if result:
+                lines = [
+                    f"✅ Evolution abgeschlossen für *{escape_markdown_v2(result.name)}*\n",
+                    f"Rolle: {escape_markdown_v2(result.role)}",
+                    f"Evolutionen: {len(result.evolution)}",
+                ]
+                if result.evolution:
+                    latest = result.evolution[-1]
+                    lines.append(f"Letzter Insight: {escape_markdown_v2(latest.get('insight', '')[:100])}")
+
+                await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await update.message.reply_text(
+                    f"❌ Agent *{escape_markdown_v2(agent_name)}* nicht gefunden"
+                )
+            return
+
+        # Unknown subcommand
+        await update.message.reply_text(
+            "Unbekannter Befehl\\. Verfügbare Optionen:\n"
+            "/agent — Agenten auflisten\n"
+            "/agent create \\<name\\> \\<rolle\\>\n"
+            "/agent assign \\<name\\> \\<skill\\>\n"
+            "/agent stats \\<name\\>\n"
+            "/agent evolve \\<name\\>",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
     async def _cmd_settings(self, update, ctx):
         """Show all configurable settings and allow changes via subcommands.
 
@@ -262,6 +458,7 @@ class NexusTelegramBot:
         /einstellungen verbose <0-1> — Change verbosity
         /einstellungen reset — Reset to defaults
         """
+        from nexus import __version__
         user = update.effective_user
         uid = str(user.id)
         parts = (update.message.text or "").strip().split()
@@ -280,7 +477,7 @@ class NexusTelegramBot:
             tech_depth = soul.personality.get("technical_depth", 0.8)
 
             text = (
-                f"⚙ *Einstellungen* — Nexus v9\n\n"
+                f"⚙ *Einstellungen* — Nexus v{escape_markdown_v2(__version__)}\n\n"
                 f"📡 *Modell:* {escape_markdown_v2(model_name)}\n"
                 f"🌍 *Sprache:* {escape_markdown_v2(language)}\n"
                 f"👔 *Formalitaet:* {formality} \\(0\\=locker, 1\\=formell\\)\n"
@@ -424,6 +621,161 @@ class NexusTelegramBot:
                 f"❓ Unbekannter Befehl: /einstellungen {subcmd}\n\n"
                 f"Verfuegbar: model, sprache, tone, humor, verbose, reset"
             )
+
+    # ─── Update & Version Commands ─────────────────────
+
+    async def _cmd_version(self, update, ctx):
+        """Show current Nexus version and check for updates."""
+        from nexus import __version__
+
+        user = update.effective_user
+        uid = str(user.id)
+        text = (
+            f"📦 *Nexus v{__version__}*\n\n"
+            f"Installierte Version: v{__version__}\n\n"
+            f"Mit /update pruefst du auf neue Versionen\\."
+        )
+        try:
+            await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            await update.message.reply_text(f"Nexus v{__version__}")
+
+    async def _cmd_update(self, update, ctx):
+        """Check for updates and show changelog with inline keyboard."""
+        from nexus import __version__
+        from nexus.core.updater import VersionChecker
+
+        user = update.effective_user
+
+        # /update now — trigger immediate update
+        parts = (update.message.text or "").strip().split()
+        if len(parts) > 1 and parts[1].lower() == "now":
+            await self._perform_update(update, ctx, user.id)
+            return
+
+        # Check GitHub for latest release
+        await update.message.reply_text("🔍 Pruefe auf Updates...", parse_mode=None)
+
+        checker = VersionChecker()
+        version_info = checker.check_github_release()
+
+        if not version_info.has_update:
+            text = f"✅ Nexus ist auf dem neuesten Stand \\(v{__version__}\\)"
+            try:
+                await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(f"✅ Nexus ist auf dem neuesten Stand (v{__version__})")
+            return
+
+        # New version available — show changelog with inline keyboard
+        text = version_info.format_update_message()
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Ja, updaten!", callback_data="update_yes"),
+                InlineKeyboardButton("❌ Spaeter", callback_data="update_no"),
+            ]
+        ])
+
+        try:
+            await update.message.reply_text(
+                text,
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=keyboard,
+            )
+        except Exception as e:
+            # Fallback without Markdown if formatting fails
+            log.warning(f"Update message formatting failed: {e}")
+            plain_text = (
+                f"🆕 Nexus v{version_info.latest} verfügbar!\n\n"
+                f"Aktuelle Version: v{version_info.current}\n"
+                f"Neueste Version: v{version_info.latest}\n\n"
+                f"/update now — Update durchführen"
+            )
+            await update.message.reply_text(plain_text)
+
+    async def _handle_update_callback(self, update, ctx):
+        """Handle inline keyboard callback for update confirmation."""
+        query = update.callback_query
+        await query.answer()
+
+        user = query.from_user
+        data = query.data
+
+        if data == "update_yes":
+            await query.edit_message_text("⏳ Update wird durchgefuehrt\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await self._perform_update(query, ctx, user.id)
+        elif data == "update_no":
+            await query.edit_message_text("Okay, kein Update\\. Vielleicht spaeter\\!", parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _perform_update(self, update_or_query, ctx, user_id: int):
+        """Execute the auto-update: git pull + docker rebuild + restart."""
+        from nexus.core.updater import AutoUpdater
+        from nexus import __version__
+
+        chat_id = None
+        bot = ctx.bot
+
+        # Get chat_id from update or callback query
+        if hasattr(update_or_query, 'effective_chat'):
+            chat_id = update_or_query.effective_chat.id
+        elif hasattr(update_or_query, 'message') and update_or_query.message:
+            chat_id = update_or_query.message.chat.id
+        else:
+            # Fallback: use authorized user
+            if self.authorized_users:
+                chat_id = list(self.authorized_users)[0]
+
+        if not chat_id:
+            log.error("Cannot determine chat_id for update notification")
+            return
+
+        # Notify: starting update
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="⏳ *Update gestartet*\\.\\.\\.\n\n1️⃣ Git Pull\\.\\.\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        except Exception:
+            pass
+
+        # Run update in background thread
+        updater = AutoUpdater()
+
+        def run_update():
+            import asyncio
+            success, message = updater.update()
+
+            # Schedule notification on the event loop
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = None
+
+            async def notify():
+                if success:
+                    text = (
+                        f"✅ *Update erfolgreich\\!*\n\n"
+                        f"Nexus wurde auf die neueste Version aktualisiert\\.\n"
+                        f"Der Container wird neu gestartet\\.\\.\\.\n\n"
+                        f"💡 Nach dem Neustart: /version zeigt die neue Version\\."
+                    )
+                else:
+                    text = f"❌ *Update fehlgeschlagen*\n\n{escape_markdown_v2(message)}"
+
+                try:
+                    await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+                except Exception:
+                    await bot.send_message(chat_id=chat_id, text=text.replace("\\", ""))
+
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(notify(), loop)
+            # If loop not available, the notification will be lost — acceptable for edge cases
+
+        import threading
+        update_thread = threading.Thread(target=run_update, daemon=True, name="nexus-update")
+        update_thread.start()
 
     # ─── Message Handler ───────────────────────────────
 

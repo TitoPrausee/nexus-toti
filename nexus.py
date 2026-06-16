@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-__version__ = "9.0"
+from nexus import __version__
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -379,7 +379,7 @@ def _register_signal_handlers(agent, config_mgr: ConfigManager):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NEXUS v9 — 6-Agent Soul-Driven AI")
+    parser = argparse.ArgumentParser(description="NEXUS v9.1 — 6-Agent Soul-Driven AI")
     parser.add_argument("--telegram", action="store_true", help="Run as Telegram bot")
     parser.add_argument("--web", action="store_true", help="Run Web UI server (Tailscale)")
     parser.add_argument("--contributor-bot", action="store_true", help="Run Discord contributor onboarding bot")
@@ -440,10 +440,47 @@ def main():
         from nexus.core.agent import NexusAgent
         from nexus.core.heartbeat import HeartbeatSystem
         from nexus.core.project_tracker import ProjectTracker
+        from nexus.core.updater import VersionChecker
         agent = NexusAgent(config)
 
-        # Start autonomous heartbeat (health checks, memory cleanup)
-        heartbeat = HeartbeatSystem(agent, config)
+        # Start Telegram bot first (needed for update notifications)
+        from nexus.interfaces.telegram_bot import NexusTelegramBot
+        bot = NexusTelegramBot(agent, config.get("telegram", {}))
+
+        # Update callback: sends notification to Telegram when update is available
+        def on_update_available(version_info):
+            """Called by heartbeat when a new version is available."""
+            import asyncio
+            try:
+                chat_ids = list(bot.authorized_users) if bot.authorized_users else []
+                if not chat_ids:
+                    log.warning("No authorized users for update notification")
+                    return
+                for chat_id in chat_ids:
+                    text = version_info.format_update_message()
+                    # Schedule the message on the bot's event loop
+                    if bot._app:
+                        loop = None
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            pass
+                        if loop and loop.is_running():
+                            asyncio.run_coroutine_threadsafe(
+                                bot._app.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=text,
+                                    parse_mode="MarkdownV2",
+                                ),
+                                loop,
+                            )
+                        else:
+                            log.warning("No running event loop for update notification")
+            except Exception as e:
+                log.error(f"Update notification failed: {e}")
+
+        # Start autonomous heartbeat with update callback
+        heartbeat = HeartbeatSystem(agent, config, update_callback=on_update_available)
         heartbeat.start()
 
         # Load project tracker for context injection
@@ -466,9 +503,6 @@ def main():
 
         # Register SIGHUP for manual reload
         _register_signal_handlers(agent, _config_manager)
-
-        from nexus.interfaces.telegram_bot import NexusTelegramBot
-        bot = NexusTelegramBot(agent, config.get("telegram", {}))
 
         try:
             import asyncio
