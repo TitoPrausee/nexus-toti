@@ -1,29 +1,40 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-9.2-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
+  <img src="https://img.shields.io/badge/version-9.3-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0a0a0a" alt="Python">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="License">
   <img src="https://img.shields.io/badge/status-production-brightgreen?style=for-the-badge&labelColor=0a0a0a" alt="Status">
 </p>
 
-<h1 align="center">NEXUS v9.2</h1>
+<h1 align="center">NEXUS v9.3</h1>
 
 <p align="center">
-  <strong>Autonomer KI-Agent mit Seele, 156 Skills und Multi-Agent-Delegation.</strong><br>
-  Erste Antwort < 4s · Parallele Agenten · Persistente Profile · Response Cache
+  <strong>Autonomer KI-Agent mit Seele, Dual-Layer Memory und Multi-Agent-Delegation.</strong><br>
+  GLM-5.2 · Hot Memory · Git-Versioned Cold Memory · 156 Skills
 </p>
 
 ---
 
-## 🆕 Was ist neu in v9.2
+## 🆕 Was ist neu in v9.3
 
 | Feature | Beschreibung |
 |---|---|
-| **Fast Response Layer** | Template-Ack < 100ms + Hybrid fast-Model-Upgrade < 2s. Erste Antwort immer < 4s. |
-| **Response Cache** | Wiederkehrende Fragen werden gecacht — Instant-Antwort < 10ms, kein LLM-Call. |
-| **Parallele Agenten** | Komplexe Aufgaben auf N Agenten verteilt (ThreadPoolExecutor). Zwischenergebnis + finale Synthese. |
-| **Agent Profile** | Persistente YAML-Profile mit Performance-Tracking, Skill-Assignments und Auto-Evolution. |
-| **Complexity Routing** | Intent → simple/moderate/complex/critical → bestimmt Agent-Anzahl und Modell-Wahl. |
-| **`/agent` Command** | Neue Telegram-Commands: create, assign, stats, evolve — Agenten managen per Chat. |
+| **L0 Hot Memory** | ~800 Tokens immer im Kontext — auto-promoted aus L3 (importance ≥ 0.8 oder access_count ≥ 3). Nie wieder wichtige Fakten vergessen. |
+| **L3-Git Cold Memory** | Git-versionierte .md-Dateien, on-demand geladen. Mensch-lesbar, diff-bar, versioniert. |
+| **Memory Tool erweitert** | `recall` sucht jetzt L3 + Git-Memory. `recall_deep` lädt volle .md-Dateien. `stats` zeigt L0 + Git-Stats. |
+| **GLM-5.2:cloud** | Neues Hauptmodell mit 1M Token-Kontext. Research + Analysis beide auf glm-5.2:cloud. |
+| **Ollama Direct** | Kein Merge-Proxy mehr — direkte lokale Ollama-Verbindung auf Port 11434, kein API-Key nötig. |
+| **Memory-Fix** | l1_max_tokens: 8000→50000, compress_threshold: 0.7→0.9, keep_ratio: 60%→85%. Kein Kontextverlust mehr. |
+| **Git im Docker** | git-Paket im Container für Cold Memory Versionierung. |
+
+### v9.2 Features (bleiben erhalten)
+
+| Feature | Beschreibung |
+|---|---|
+| **Fast Response Layer** | Template-Ack < 100ms + Hybrid fast-Model-Upgrade < 2s. |
+| **Response Cache** | Wiederkehrende Fragen < 10ms, kein LLM-Call. |
+| **Parallele Agenten** | Komplexe Aufgaben auf N Agenten verteilt (ThreadPoolExecutor). |
+| **Agent Profile** | Persistente YAML-Profile mit Performance-Tracking und Auto-Evolution. |
+| **Complexity Routing** | Intent → simple/moderate/complex/critical. |
 
 ---
 
@@ -267,26 +278,39 @@ sequenceDiagram
     I-->>U: Nachricht
 ```
 
-### Memory-Hierarchie
+### Memory-Hierarchie (v9.3)
 
 ```mermaid
 graph TD
+    subgraph L0["L0 — Hot Memory (immer im Kontext)"]
+        direction LR
+        L0A[Kritische Fakten] --> L0B[~800 Tokens]
+        L0B --> L0C[Auto-Promoted<br/>importance ≥ 0.8]
+    end
+
     subgraph L1["L1 — Working Memory"]
         direction LR
-        L1A[Aktuelle Konversation] --> L1B[Auto-Trim<br/>bei Token-Limit]
-        L1B --> L1C[Komprimierung<br/>→ L2]
+        L1A[Aktuelle Konversation] --> L1B[Auto-Trim<br/>bei 90% Token-Limit]
+        L1B --> L1C[Komprimierung<br/>→ L2 + L3-Git]
     end
 
     subgraph L2["L2 — Session Memory"]
         direction LR
-        L2A[Session-Zusammenfassungen] --> L2B[48h TTL<br/>max 50 Einträge]
+        L2A[Session-Zusammenfassungen] --> L2B[7 Tage TTL<br/>max 200 Einträge]
         L2B --> L2C[Verfall<br/>→ gelöscht]
     end
 
     subgraph L3["L3 — Long-Term Memory"]
         direction LR
-        L3A[Wichtige Fakten] --> L3B[Keyword-Recall<br/>max 200 Einträge]
+        L3A[Wichtige Fakten] --> L3B[Vector + Keyword Recall<br/>max 500 Einträge]
         L3B --> L3C[Importance-Decay<br/>niedrige = verfallen]
+    end
+
+    subgraph L3G["L3-Git — Cold Memory (versioniert)"]
+        direction LR
+        G1[projects/*.md] --> G2[infrastructure/*.md]
+        G2 --> G3[learnings/*.md]
+        G3 --> G4[sessions/*.md]
     end
 
     subgraph L4["L4 — Soul (PERMANENT)"]
@@ -295,8 +319,10 @@ graph TD
         L4B --> L4C[Kernwissen]
     end
 
+    L3 -->|promotion ≥ 0.8| L0
     L1 -->|auto-compress| L2
     L2 -->|important facts| L3
+    L3 -->|importance ≥ 0.7| L3G
     L3 -->|identity-level| L4
 
     style L1 fill:#0f3460,stroke:#e94560,color:#fff
@@ -484,8 +510,9 @@ nexus/
     agent_profiles.py        Persistente Profile ─ YAML, Performance, Auto-Evolution
     llm_client.py           Ollama Cloud Client ─ Streaming · Fallback-Chain · Merge Proxy
     pair_router.py           Pair Router ─ Intent + Complexity Classification
-    memory.py               L1→L2→L3→L4 Memory ─ Working → Session → Long-Term → Soul
-    tools.py                ToolRegistry ─ 11 produktive Werkzeuge, null Stubs
+    memory.py               L0→L1→L2→L3→L4 Memory ─ Hot → Working → Session → Long-Term → Soul
+    hot_memory.py            L0 Hot Memory ─ Always-in-context facts, auto-promoted from L3
+    git_memory.py            L3-Git Cold Memory ─ Versioned .md files, on-demand loaded
     config.py               ConfigManager ─ Hot-Reload · mtime-Watcher · SIGHUP
     config_validation.py    Config-Validierung ─ Schema · Defaults · Migration
     session_manager.py      Per-Chat Sessions ─ Isolation · Timeout · Eviction
@@ -570,12 +597,12 @@ Toti besitzt eine **Seele** — persistent, adaptiv, einzigartig:
 
 Die Seele ist kein gimmick — sie definiert **wer Toti ist**, nicht was er tut. Session-State wird gelöscht; die Seele bleibt.
 
-## 5-Department Team (v9.2)
+## 5-Department Team (v9.3)
 
 | Department | Modell | Rolle | Parallel | Profile |
 |---|---|---|---|---|
-| **CEO** | `glm-5.1:cloud` | Priorisierung, Delegation, Synthese | ✅ Synthese | `data/agents/ceo.yaml` |
-| **Research** | `glm-5.1:cloud` | Recherche, Analyse, Fakten | ✅ Parallel | `data/agents/research.yaml` |
+| **CEO** | `glm-5.2:cloud` | Priorisierung, Delegation, Synthese | ✅ Synthese | `data/agents/ceo.yaml` |
+| **Research** | `glm-5.2:cloud` | Recherche, Analyse, Fakten | ✅ Parallel | `data/agents/research.yaml` |
 | **Engineering** | `qwen3-coder-next:cloud` | Code, Build, Deploy | ✅ Parallel | `data/agents/engineering.yaml` |
 | **Creative** | `gemma4:cloud` | Design, Text, UI/UX | ✅ Parallel | `data/agents/creative.yaml` |
 | **Operations** | `deepseek-v4-flash:cloud` | Planung, Monitoring, Schnelles | ✅ Parallel | `data/agents/operations.yaml` |
@@ -583,7 +610,7 @@ Die Seele ist kein gimmick — sie definiert **wer Toti ist**, nicht was er tut.
 | Fallback | Modell | Einsatzgebiet |
 |---|---|---|
 | **Cloud Fallback 1** | `deepseek-v4-flash:cloud` | Schneller Fallback bei Primärmodell-Ausfall |
-| **Cloud Fallback 2** | `glm-5.1:cloud` | Universeller Fallback |
+| **Cloud Fallback 2** | `glm-5.2:cloud` | Universeller Fallback |
 
 ### Complexity Routing
 
@@ -627,17 +654,24 @@ Nutzer-Nachricht
 ## Memory-System
 
 ```
-L1 ─ Working Memory     Aktuelle Konversation, auto-getrimmt bei Token-Limit
+L0 ─ Hot Memory         Immer im Kontext (~800 Tokens), auto-promoted aus L3
  │
-L2 ─ Session Memory     Zusammenfassungen vergangener Sessions, 48h TTL
+L1 ─ Working Memory     Aktuelle Konversation, auto-getrimmt bei 90% Token-Limit
  │
-L3 ─ Long-Term Memory   Wichtige Fakten & Präferenzen, keyword-recall, 200 Einträge
+L2 ─ Session Memory     Zusammenfassungen vergangener Sessions, 7 Tage TTL
+ │
+L3 ─ Long-Term Memory   Wichtige Fakten & Präferenzen, vector+keyword recall, 500 Einträge
+ │
+L3-Git ─ Cold Memory    Versionierte .md-Dateien, on-demand geladen, git-versioniert
  │
 L4 ─ Soul               Identität, Beziehungen, Kernwissen — PERMANENT
 ```
 
-Jede Schicht hat eigene Limits, Compression- und Eviction-Strategien.  
-L1 wird automatisch komprimiert, L3-Einträge decayen nach Wichtigkeit, L4 ist unantastbar.
+**L0 Hot Memory** ist der Schlüssel-Unterschied zu v9.2: Die wichtigsten Fakten (importance ≥ 0.8 oder access_count ≥ 3) sind **immer** im System-Prompt, ohne dass der Agent sie erst suchen muss. Nie wieder "ich erinnere mich nicht" bei kritischen Infos.
+
+**L3-Git Cold Memory** speichert Details on-demand in versionierten .md-Dateien. Nur wenn der Agent etwas tiefgreifendes braucht, lädt er die entsprechende Datei. Spart Tokens und ist trotzdem vollständig verfügbar.
+
+Promotion/Demotion: L3 → L0 (auto bei Wichtigkeit/Häufigkeit), L0 → L3 (auto bei Veraltung), L3 → L3-Git (auto bei importance ≥ 0.7).
 
 ## Tools
 
@@ -655,7 +689,7 @@ Alle **produktiv implementiert** — keine Platzhalter, keine Stubs:
 | `calculator` | Mathematische Ausdrücke berechnen |
 | `time` | Aktuelle Datum/Zeit |
 | `delegation` | Aufgabe an Team-Abteilung delegieren (single/parallel/full_team) |
-| `memory` | L1→L4 Gedächtnis verwalten (remember/recall/stats) |
+| `memory` | L0→L4 Gedächtnis verwalten (remember/recall/recall_deep/stats) |
 
 Tool-Aufrufe erfolgen über XML-Tags im LLM-Output: `<tool>{"tool": "terminal", "command": "ls"}</tool>`
 
@@ -715,33 +749,43 @@ Alle Einstellungen zentral in `config.yaml`:
 
 ```yaml
 llm:
-  mode: cloud                        # cloud ONLY — kein lokaler Fallback
-  default_model: glm-5.1:cloud       # via Merge Proxy
+  mode: cloud                        # cloud ONLY — direkt über lokales Ollama
+  default_model: glm-5.2:cloud       # 1M Token-Kontext
   stream: true                       # Streaming-Responses
 
   # 5-Department Delegation via Pair Router
   models:
     coding: "qwen3-coder-next:cloud"
-    research: "glm-5.1:cloud"
-    analysis: "kimi-k2.6:cloud"
+    research: "glm-5.2:cloud"
+    analysis: "glm-5.2:cloud"
     creative: "gemma4:cloud"
     fast: "deepseek-v4-flash:cloud"
 
-  # Cloud-only Fallback
-  fallback: ["deepseek-v4-flash:cloud", "glm-5.1:cloud"]
+  # Cloud-only Fallback (direkt, kein Merge-Proxy)
+  fallback: ["deepseek-v4-flash:cloud", "glm-5.2:cloud"]
 
 soul:
   enabled: true                      # Persistente Persönlichkeit + DSGVO
 
 memory:
-  l1_max_tokens: 8000               # Working Memory Budget
-  l2_max_entries: 50                 # Session Summaries
-  l3_max_entries: 200                # Long-Term Facts
-  auto_compress: true                # L1 automatisch komprimieren
+  # v9.3: Memory-Fix + Dual-Layer
+  l1_max_tokens: 50000              # GLM-5.2 hat 1M Kontext
+  l2_max_entries: 200                 # 7 Tage Historie
+  l2_max_age_hours: 168
+  l3_max_entries: 500
+  auto_compress: true
+  compress_threshold: 0.9             # erst bei 90% komprimieren
+  # L0 Hot Memory (immer im Kontext)
+  hot_max_tokens: 1000               # ~800 Tokens soft limit
+  hot_max_facts: 10
+  hot_promotion_importance: 0.8      # auto-promote bei importance >= 0.8
+  hot_promotion_access_count: 3      # oder access_count >= 3
+  # L3-Git Cold Memory (versioniert, on-demand)
+  git_enabled: true                  # git versioning
+  git_remote: ""                     # leer = lokal nur
+  git_sync_interval_seconds: 3600    # stündlicher sync
   vector_search:
     enabled: true                    # Semantische Suche in L3
-
-# ⚡ Fast Response Layer (v9.2)
 fast_response:
   enabled: true
   hybrid_ack_timeout: 2.0           # Sekunden für Hybrid-Ack-Upgrade

@@ -14,7 +14,7 @@ knowledge:
   - Heartbeat: System-Health-Monitoring mit Auto-Restart
   projects: {}
   technical:
-  - Ollama direkt auf dem Mac für LLM-Inferenz (glm-5.1, deepseek-v4-flash, etc.)
+  - Ollama direkt auf dem Mac für LLM-Inferenz (glm-5.2, deepseek-v4-flash, etc.)
   - Python-Toolchain für Ausführung (Terminal, Dateien, Web-Suche, Code-Exec)
   - Telegram als primäres Interface (MarkdownV2, Streaming, Rate-Limiting)
   - Pair Architecture: Router (fast) → Worker (capable) → Critic (quality)
