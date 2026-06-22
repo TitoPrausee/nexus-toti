@@ -408,6 +408,17 @@ def main():
     _config_manager = ConfigManager(args.config, check_interval=5.0)
     config = _config_manager.config
 
+    # Atlas Memory System initialisieren
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "atlas"))
+        from memory_orchestrator import MemoryOrchestrator
+        atlas_memory = MemoryOrchestrator()
+        config["atlas_memory"] = atlas_memory
+        logging.getLogger("nexus").info(f"🧠 Atlas Memory initialisiert: {len(atlas_memory.status()['L3_longterm']['files'])} Dateien")
+    except Exception as e:
+        logging.getLogger("nexus").warning(f"⚠️ Atlas Memory nicht verfügbar: {e}")
+        config["atlas_memory"] = None
+
     # Print startup banner
     print_startup_banner(config)
 

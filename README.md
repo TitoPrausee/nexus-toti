@@ -1,32 +1,33 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-9.3-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
+  <img src="https://img.shields.io/badge/version-10.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0a0a0a" alt="Python">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge&labelColor=0a0a0a" alt="License">
   <img src="https://img.shields.io/badge/status-production-brightgreen?style=for-the-badge&labelColor=0a0a0a" alt="Status">
 </p>
 
-<h1 align="center">NEXUS v9.3</h1>
+<h1 align="center">NEXUS v10.0</h1>
 
 <p align="center">
-  <strong>Autonomer KI-Agent mit Seele, Dual-Layer Memory und Multi-Agent-Delegation.</strong><br>
-  GLM-5.2 · Hot Memory · Git-Versioned Cold Memory · 156 Skills
+  <strong>Autonomer KI-Agent mit Atlas Git Memory, 5-Layer Memory-System und Multi-Agent-Delegation.</strong><br>
+  GLM-5.2 · Atlas Memory · Git-Versioniert · 156 Skills
 </p>
 
 ---
 
-## 🆕 Was ist neu in v9.3
+## 🆕 Was ist neu in v10.0
 
 | Feature | Beschreibung |
 |---|---|
-| **L0 Hot Memory** | ~800 Tokens immer im Kontext — auto-promoted aus L3 (importance ≥ 0.8 oder access_count ≥ 3). Nie wieder wichtige Fakten vergessen. |
-| **L3-Git Cold Memory** | Git-versionierte .md-Dateien, on-demand geladen. Mensch-lesbar, diff-bar, versioniert. |
-| **Memory Tool erweitert** | `recall` sucht jetzt L3 + Git-Memory. `recall_deep` lädt volle .md-Dateien. `stats` zeigt L0 + Git-Stats. |
-| **GLM-5.2:cloud** | Neues Hauptmodell mit 1M Token-Kontext. Research + Analysis beide auf glm-5.2:cloud. |
-| **Ollama Direct** | Kein Merge-Proxy mehr — direkte lokale Ollama-Verbindung auf Port 11434, kein API-Key nötig. |
-| **Memory-Fix** | l1_max_tokens: 8000→50000, compress_threshold: 0.7→0.9, keep_ratio: 60%→85%. Kein Kontextverlust mehr. |
-| **Git im Docker** | git-Paket im Container für Cold Memory Versionierung. |
+| **Atlas Git Memory (5 Layer)** | Komplett neues Memory-System: L0 Hot Memory → L1 Working → L2 Sessions → L3 Long-term → L4 Git Archive. **Nie komprimieren — immer versionieren.** |
+| **L0 Hot Memory** | ~800 Tokens immer im Kontext — kritische Fakten, aktive Projekte, Infrastruktur. Auto-promoted aus L3. |
+| **L4 Git Archive** | Unendliches, versioniertes Memory. Jeder Fakt ist ein Git-Commit. `git log`, `git diff`, `git blame`, `git checkout` — vollständige Versionsgeschichte. |
+| **Context Loader** | Relevanz-basiertes Laden statt Kompression. Nur das wird geladen, was für die aktuelle Frage relevant ist. |
+| **Migration Engine** | Importiert Memories aus Hermes, Mercury v1/v2, Nova und Claude — dedupliziert mit Provenance-Tagging. |
+| **Skill Consolidator** | 617 Skills aus 5 Agenten-Quellen gescannt, dedupliziert und in 25 Kategorien konsolidiert. |
+| **GLM-5.2:cloud** | Hauptmodell mit 1M Token-Kontext. |
+| **Memory Tool erweitert** | `search` durchsucht das gesamte Git-Archiv. `log` zeigt Versionsgeschichte. `diff` zeigt Änderungen zwischen Versionen. `rollback` stellt frühere Versionen wieder her. |
 
-### v9.2 Features (bleiben erhalten)
+### v9.3 Features (bleiben erhalten)
 
 | Feature | Beschreibung |
 |---|---|
@@ -40,7 +41,7 @@
 
 ## Diagramme
 
-### System-Architektur (v9.2)
+### System-Architektur (v10.0)
 
 ```mermaid
 graph TB
@@ -55,21 +56,29 @@ graph TB
         QR[QuickResponder<br/>Template-Ack · Hybrid fast-Model]
     end
 
-    subgraph NexusAgent["NEXUS v9.2 — Agent Core"]
+    subgraph NexusAgent["NEXUS v10.0 — Agent Core"]
         AG[Agent Core<br/>Think-Act Loop · Circular-Chain Detection]
         PR[Pair Router<br/>6-Agent Delegation · Complexity Routing]
         SOUL[SoulEngine<br/>Persönlichkeit · Beziehungen · DSGVO]
-        MEM[MemorySystem<br/>L1 · L2 · L3 · L4 · Vector Search]
+        AM[Atlas Memory<br/>5 Layer · Git-basiert · Keine Kompression]
         TOOLS[ToolRegistry<br/>11 Werkzeuge]
-        LLM[LLMClient<br/>Ollama Cloud · Merge Proxy]
+        LLM[LLMClient<br/>Ollama Cloud · glm-5.2:cloud]
         HB[Heartbeat<br/>Process Health · Auto-Restart]
         PT[Project Tracker<br/>Context · Status]
         SM[Session Manager<br/>Per-Chat Isolation · Timeout]
     end
 
+    subgraph AtlasMemory["🧠 Atlas Memory System"]
+        L0["L0 Hot Memory<br/>immer im Context"]
+        L1["L1 Working Memory<br/>nie komprimiert"]
+        L2["L2 Session Memory<br/>archiviert"]
+        L3["L3 Long-term Memory<br/>git-versioniert"]
+        L4["L4 Git Archive<br/>unendlich"]
+    end
+
     subgraph AgentTeam["5-Department Team + Parallel"]
-        CEO["CEO<br/>glm-5.1:cloud<br/>Priorisierung · Synthese"]
-        SC["Research<br/>glm-5.1:cloud<br/>Recherche · Analyse"]
+        CEO["CEO<br/>glm-5.2:cloud<br/>Priorisierung · Synthese"]
+        SC["Research<br/>glm-5.2:cloud<br/>Recherche · Analyse"]
         FG["Engineering<br/>qwen3-coder-next:cloud<br/>Code · Build · Deploy"]
         HD["Creative<br/>gemma4:cloud<br/>Design · Text · UI"]
         OPS["Operations<br/>deepseek-v4-flash:cloud<br/>Schnell · Effizient"]
@@ -94,8 +103,7 @@ graph TB
     subgraph Persistence["Persistenz"]
         SY[soul.yaml]
         RJ[relations.json]
-        LJ[longterm.json]
-        SJ[session.json]
+        GIT[.git — vollständige History]
         CACHE[response_cache.json]
         DSGVO[dsgvo_config.yaml]
     end
@@ -109,11 +117,17 @@ graph TB
     AG --> QR
     AG --> PR
     AG --> SOUL
-    AG --> MEM
+    AG --> AM
     AG --> TOOLS
     AG --> LLM
     AG --> HB
     AG --> PT
+
+    AM --> L0
+    AM --> L1
+    AM --> L2
+    AM --> L3
+    AM --> L4
 
     PR --> CEO
     PR --> SC
@@ -136,8 +150,7 @@ graph TB
     SOUL --> SY
     SOUL --> RJ
     SOUL --> DSGVO
-    MEM --> SJ
-    MEM --> LJ
+    L4 --> GIT
     AG --> CACHE
 
     style AG fill:#1a1a2e,stroke:#e94560,color:#fff
@@ -145,12 +158,17 @@ graph TB
     style QR fill:#0a2a0a,stroke:#4CAF50,color:#fff
     style RC fill:#0a2a0a,stroke:#4CAF50,color:#fff
     style SOUL fill:#16213e,stroke:#0f3460,color:#fff
-    style MEM fill:#16213e,stroke:#0f3460,color:#fff
+    style AM fill:#16213e,stroke:#0f3460,color:#fff
     style TOOLS fill:#16213e,stroke:#0f3460,color:#fff
     style LLM fill:#16213e,stroke:#e94560,color:#fff
     style HB fill:#1a2e1a,stroke:#4CAF50,color:#fff
     style PT fill:#1a2e1a,stroke:#4CAF50,color:#fff
     style SM fill:#2e1a1a,stroke:#FF9800,color:#fff
+    style L0 fill:#ff6b6b,color:#fff
+    style L1 fill:#ffa502,color:#fff
+    style L2 fill:#ffd32a,color:#000
+    style L3 fill:#7bed9f,color:#000
+    style L4 fill:#70a1ff,color:#fff
     style CEO fill:#1a1a2e,stroke:#e94560,color:#fff
     style SC fill:#16213e,stroke:#533483,color:#fff
     style FG fill:#0f3460,stroke:#533483,color:#fff
@@ -159,7 +177,7 @@ graph TB
     style CACHE fill:#0a2a0a,stroke:#4CAF50,color:#4CAF50
 ```
 
-### Request-Flow (v9.2) — Erste Antwort < 4s
+### Request-Flow (v10.0) — Erste Antwort < 4s
 
 ```mermaid
 sequenceDiagram
@@ -169,6 +187,7 @@ sequenceDiagram
     participant QR as QuickResponder
     participant PR as Pair Router
     participant AG as NexusAgent
+    participant AM as Atlas Memory
     participant TEAM as Agent Team
     participant LLM as LLMClient
 
@@ -186,6 +205,9 @@ sequenceDiagram
         QR-->>AG: Template-Ack (< 100ms)
         AG-->>TG: "🧠 Analysiere..." (sofort)
         Note over QR,AG: Parallel: fast-Model generiert besseren Ack
+
+        AG->>AM: load_context(message)
+        AM-->>AG: L0 Hot + L2 Sessions + L3 Fakten
 
         AG->>PR: classify_intent(message)
         PR-->>AG: Intent + Complexity
@@ -212,11 +234,13 @@ sequenceDiagram
             AG->>RC: store(message, final_answer)
             AG-->>TG: Finale Antwort
         end
+
+        AG->>AM: archive_session(topic, facts, decisions)
         TG-->>U: ✅ Antwort
     end
 ```
 
-### Think-Act Loop (v9.2)
+### Think-Act Loop (v10.0)
 
 ```mermaid
 sequenceDiagram
@@ -227,7 +251,7 @@ sequenceDiagram
     participant A as NexusAgent
     participant PR as Pair Router
     participant QR as QuickResponder
-    participant M as Memory
+    participant AM as Atlas Memory
     participant S as Soul + DSGVO
     participant L as LLMClient
     participant T as Tools
@@ -246,9 +270,9 @@ sequenceDiagram
         A->>QR: generate_ack(message, routing)
         QR-->>I: Template-Ack (sofort)
         A->>HB: heartbeat_pulse()
-        A->>M: add(user, message)
+        A->>AM: load_context(message)
+        AM-->>A: L0 Hot + L2 Sessions + L3 Fakten
         A->>S: get_system_prompt() + get_user_context()
-        A->>M: get_context(max_tokens) + vector_search()
         A->>PR: route(message, context)
         PR-->>A: Intent + Complexity
 
@@ -270,7 +294,7 @@ sequenceDiagram
         end
 
         A->>S: scrub_secrets(response)
-        A->>M: add(assistant, response)
+        A->>AM: archive_session(topic, facts, decisions)
         A->>RC: store(message, response, importance)
         A->>S: update_user(user_id, trust_delta=+0.01)
         A-->>I: response (MarkdownV2 formatted)
@@ -278,70 +302,94 @@ sequenceDiagram
     I-->>U: Nachricht
 ```
 
-### Memory-Hierarchie (v9.3)
+### Atlas Memory-Hierarchie (v10.0)
 
 ```mermaid
 graph TD
     subgraph L0["L0 — Hot Memory (immer im Kontext)"]
         direction LR
-        L0A[Kritische Fakten] --> L0B[~800 Tokens]
-        L0B --> L0C[Auto-Promoted<br/>importance ≥ 0.8]
+        L0A[Kritische Fakten<br/>User · Projekte · Infra] --> L0B[~800 Tokens]
+        L0B --> L0C[Auto-Promoted<br/>aus L3 bei Wichtigkeit]
     end
 
     subgraph L1["L1 — Working Memory"]
         direction LR
-        L1A[Aktuelle Konversation] --> L1B[Auto-Trim<br/>bei 90% Token-Limit]
-        L1B --> L1C[Komprimierung<br/>→ L2 + L3-Git]
+        L1A[Aktuelle Konversation] --> L1B[Nie komprimiert<br/>vollständig erhalten]
+        L1B --> L1C[Archiviert als<br/>Session bei Ende]
     end
 
     subgraph L2["L2 — Session Memory"]
         direction LR
-        L2A[Session-Zusammenfassungen] --> L2B[7 Tage TTL<br/>max 200 Einträge]
-        L2B --> L2C[Verfall<br/>→ gelöscht]
+        L2A[Session-Zusammenfassungen] --> L2B[Strukturiert als .md<br/>Topics · Facts · Decisions]
+        L2B --> L2C[Relevanz-basiert<br/>nur passende laden]
     end
 
     subgraph L3["L3 — Long-Term Memory"]
         direction LR
-        L3A[Wichtige Fakten] --> L3B[Vector + Keyword Recall<br/>max 500 Einträge]
-        L3B --> L3C[Importance-Decay<br/>niedrige = verfallen]
+        L3A[Git-versionierte .md] --> L3B[projects/*.md<br/>infrastructure/*.md]
+        L3B --> L3C[learnings/*.md<br/>decisions/*.md]
     end
 
-    subgraph L3G["L3-Git — Cold Memory (versioniert)"]
+    subgraph L4["L4 — Git Archive (unendlich)"]
         direction LR
-        G1[projects/*.md] --> G2[infrastructure/*.md]
-        G2 --> G3[learnings/*.md]
-        G3 --> G4[sessions/*.md]
+        G1[git log] --> G2[git diff]
+        G2 --> G3[git checkout]
+        G3 --> G4[git blame]
     end
 
-    subgraph L4["L4 — Soul (PERMANENT)"]
-        direction LR
-        L4A[Persönlichkeit] --> L4B[Beziehungen]
-        L4B --> L4C[Kernwissen]
-    end
+    L3 -->|promotion| L0
+    L1 -->|session end| L2
+    L2 -->|wichtige Fakten| L3
+    L3 -->|git commit| L4
 
-    L3 -->|promotion ≥ 0.8| L0
-    L1 -->|auto-compress| L2
-    L2 -->|important facts| L3
-    L3 -->|importance ≥ 0.7| L3G
-    L3 -->|identity-level| L4
+    style L0 fill:#ff6b6b,color:#fff
+    style L1 fill:#ffa502,color:#fff
+    style L2 fill:#ffd32a,color:#000
+    style L3 fill:#7bed9f,color:#000
+    style L4 fill:#70a1ff,color:#fff
+```
 
-    style L1 fill:#0f3460,stroke:#e94560,color:#fff
-    style L2 fill:#16213e,stroke:#533483,color:#fff
-    style L3 fill:#1a1a2e,stroke:#0f3460,color:#fff
-    style L4 fill:#0a0a0a,stroke:#e94560,color:#e94560
+### Context Loading (statt Kompression)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as Nexus
+    participant L0 as L0 Hot Memory
+    participant L2 as L2 Sessions
+    participant L3 as L3 Long-term
+    participant L4 as L4 Git Archive
+
+    U->>A: "Was war die Deployment-Strategie für FSU Connect?"
+
+    A->>L0: L0 Check: Ist FSU Connect aktiv?
+    L0-->>A: Ja, Priority #1 (Next.js 14 + Hono + PostgreSQL)
+
+    A->>L3: MEMORY.md nach "FSU Connect deployment" durchsuchen
+    L3-->>A: projects/fsu-connect.md, decisions/deployment-strategy.md
+
+    A->>L2: Session-Dateien nach "FSU Connect deployment" durchsuchen
+    L2-->>A: 2026-06-15: Docker Compose + Traefik entschieden
+
+    A->>L4: Git log für deployment-strategy.md
+    L4-->>A: 3 Änderungen seit Erstellung
+
+    Note over A: Assembly ins System-Prompt<br/>KEINE Kompression!
+
+    A-->>U: "Deployment: Docker Compose auf dev-server<br/>mit Traefik Reverse Proxy (entschieden am 15.06.)"
 ```
 
 ### LLM-Fallback-Chain (Cloud-Only)
 
 ```mermaid
 flowchart TD
-    REQ[Anfrage] --> PRIM{Primary Model<br/>kimi-k2.6:cloud<br/>via Merge Proxy}
+    REQ[Anfrage] --> PRIM{Primary Model<br/>glm-5.2:cloud<br/>via Ollama Cloud}
 
     PRIM -->|Erfolg| RESP[Antwort an Agent]
     PRIM -->|Fehler| CF1{Cloud Fallback<br/>deepseek-v4-flash:cloud}
 
     CF1 -->|Erfolg| RESP
-    CF1 -->|Fehler| CF2{Universal Fallback<br/>glm-5.1:cloud}
+    CF1 -->|Fehler| CF2{Universal Fallback<br/>gemini-3-flash-preview:cloud}
 
     CF2 -->|Erfolg| RESP
     CF2 -->|Fehler| ERR[Graceful Error<br/>Nutzer benachrichtigen]
@@ -434,16 +482,14 @@ classDiagram
         +notes: list
     }
 
-    class MemorySystem {
-        +l1: list
-        +l2: list
-        +l3: list
-        +add(role, content, importance)
-        +get_context(max_tokens) list
-        +remember(content, category, importance)
-        +recall(query, limit) list
-        +vector_search(query) list
-        +end_session()
+    class AtlasMemory {
+        +load_context(query) str
+        +save_fact(domain, name, content) bool
+        +search(keyword) list
+        +archive_session(topic, facts, decisions) bool
+        +rollback(path, hash) bool
+        +diff(path, h1, h2) str
+        +status() dict
     }
 
     class ResponseCache {
@@ -474,7 +520,7 @@ classDiagram
 
     class NexusAgent {
         +llm: LLMClient
-        +memory: MemorySystem
+        +memory: AtlasMemory
         +soul: SoulEngine
         +tools: ToolRegistry
         +pair_router: PairRouter
@@ -486,7 +532,7 @@ classDiagram
     }
 
     NexusAgent --> SoulEngine : uses
-    NexusAgent --> MemorySystem : uses
+    NexusAgent --> AtlasMemory : uses
     NexusAgent --> PairRouter : delegates
     NexusAgent --> ResponseCache : caches
     NexusAgent --> QuickResponder : fast ack
@@ -508,11 +554,10 @@ nexus/
     agent.py                NexusAgent ─ Orchestrator, Think-Act Loop, Cache, QuickResponder
     agent_team.py            5-Department Team ─ Parallel Delegation, Complexity Classification
     agent_profiles.py        Persistente Profile ─ YAML, Performance, Auto-Evolution
-    llm_client.py           Ollama Cloud Client ─ Streaming · Fallback-Chain · Merge Proxy
+    llm_client.py           Ollama Cloud Client ─ Streaming · Fallback-Chain
     pair_router.py           Pair Router ─ Intent + Complexity Classification
-    memory.py               L0→L1→L2→L3→L4 Memory ─ Hot → Working → Session → Long-Term → Soul
-    hot_memory.py            L0 Hot Memory ─ Always-in-context facts, auto-promoted from L3
-    git_memory.py            L3-Git Cold Memory ─ Versioned .md files, on-demand loaded
+    memory_engine.py         Atlas Memory Wrapper ─ 5 Layer, Git-basiert
+    memory.py               L0→L1→L2→L3→L4 Memory (erweitert um Atlas)
     config.py               ConfigManager ─ Hot-Reload · mtime-Watcher · SIGHUP
     config_validation.py    Config-Validierung ─ Schema · Defaults · Migration
     session_manager.py      Per-Chat Sessions ─ Isolation · Timeout · Eviction
@@ -537,14 +582,32 @@ nexus/
     soul.yaml               Persönlichkeits-Definition (Werte, Regeln, Stil, Security)
   memory/                   Runtime-Daten (gitignored · persistent via Docker Volume)
 
+atlas/                      Atlas Memory System (5 Layer, Git-basiert)
+  git_memory.py             Git Memory Engine ─ save, load, search, log, diff, rollback
+  hot_memory.py             L0 Hot Memory ─ immer im Kontext, auto-promoted
+  session_manager.py        L2 Session Memory ─ archivieren, finden, laden
+  context_loader.py         Context Loader ─ relevanz-basiertes Laden, keine Kompression
+  memory_orchestrator.py    Memory Orchestrator ─ alle 5 Layer steuern
+  migrate.py                Migration Engine ─ Agenten-Memories importieren
+  consolidate_skills.py     Skill Consolidator ─ Skills aus 5 Quellen mergen
+
 data/
   agents/                   ⚡ Persistente Agent-Profile (YAML)
     ceo.yaml                CEO ─ Orchestrierung, Synthese
     research.yaml           Research ─ Recherche, Analyse
     engineering.yaml        Engineering ─ Code, Build, Deploy
     creative.yaml           Creative ─ Design, Text, UI
-    operations.yaml        Operations ─ Schnell, Effizient
+    operations.yaml         Operations ─ Schnell, Effizient
   skills/                   156 Skills in 22 Kategorien
+  memory/git/               Git-basiertes Memory (versioniert)
+    MEMORY.md               Master-Index
+    user/                   User-Profil, Kommunikation
+    projects/               Projekt-Memory
+    infrastructure/          Docker, Ollama, Tailscale
+    learnings/              Fehler, Lösungen, Patterns
+    decisions/              Architekturentscheidungen
+    sessions/               Archivierte Sessions
+    agents/                 Importierte Agenten-Memories
 ```
 
 ## Quick Start
@@ -558,7 +621,7 @@ curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/insta
 Oder nicht-interaktiv mit Telegram-Token:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash -s -- --token 123456:ABC-DEF --chat-id ***REMOVED***
+curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/install.sh | bash -s -- --token ***REMOVED*** --chat-id ***REMOVED***
 ```
 
 Deinstallation:
@@ -572,7 +635,21 @@ curl -fsSL https://raw.githubusercontent.com/***REMOVED***/nexus-toti/main/insta
 ```bash
 git clone https://github.com/***REMOVED***/nexus-toti.git && cd nexus-toti
 cp .env.example .env         # Api-Keys eintragen
-docker compose up -d nexus-telegram
+mkdir -p ~/.nexus/memory/git
+docker compose up -d
+```
+
+### Management Script
+
+```bash
+chmod +x nexus.sh
+./nexus.sh start              # Nexus starten (Port 8690)
+./nexus.sh status              # Status anzeigen
+./nexus.sh chat                # Interaktiver Chat
+./nexus.sh memory status       # Atlas Memory Status
+./nexus.sh memory search <s>   # Im Git-Archiv suchen
+./nexus.sh memory log          # Versionsgeschichte anzeigen
+./nexus.sh doctor              # Diagnose
 ```
 
 ### Lokale Installation (ohne Docker)
@@ -584,20 +661,51 @@ python nexus.py --test       # Self-Test
 python nexus.py --telegram   # Telegram-Bot starten
 ```
 
+## Atlas Memory System
+
+Das Herzstück von NEXUS v10.0 ist das **Atlas Git Memory System** — 5 Layer, keine Kompression, alles versioniert.
+
+```
+L0 ─ Hot Memory         Immer im Kontext (~800 Tokens), auto-promoted aus L3
+ │                       User-Profil, aktive Projekte, Infrastruktur, Regeln
+L1 ─ Working Memory     Aktuelle Konversation, NIE komprimiert
+ │                       Vollständig erhalten, bei Session-Ende archiviert
+L2 ─ Session Memory     Archivierte Sessions als .md-Dateien
+ │                       Topics · Key Facts · Decisions · Relevanz-basiertes Laden
+L3 ─ Long-term Memory   Git-versionierte .md-Dateien nach Domain
+ │                       projects/ · infrastructure/ · learnings/ · decisions/
+L4 ─ Git Archive        Unendlich, versioniert, durchsuchbar
+                        git log · git diff · git blame · git checkout · git push/pull
+```
+
+**Die Kerninnovation:** Statt Context-Window zu komprimieren (und damit Persönlichkeit zu verlieren), wird **relevanz-basiert geladen**. Nur das kommt in den Context, was für die aktuelle Frage relevant ist. Alles andere bleibt versioniert im Git-Repo — jederzeit durchsuchbar, rückholbar, diffbar.
+
+### Memory-Operationen
+
+| Operation | Beschreibung | Git-Analogie |
+|---|---|---|
+| `save_fact(domain, name, content)` | Fakt speichern | `git add + git commit` |
+| `search(keyword)` | Volltext-Suche | `git grep` |
+| `log(path)` | Versionsgeschichte | `git log` |
+| `diff(path, hash1, hash2)` | Änderungen vergleichen | `git diff` |
+| `rollback(path, hash)` | Frühere Version wiederherstellen | `git checkout` |
+| `archive_session(topic, facts, decisions)` | Session archivieren | `git commit -m "session: ..."` |
+| `promote_project(name, tech, priority)` | Ins Hot Memory befördern | L0-Update |
+
 ## Soul-Driven Architecture
 
-Toti besitzt eine **Seele** — persistent, adaptiv, einzigartig:
+Nexus besitzt eine **Seele** — persistent, adaptiv, einzigartig:
 
 | Schicht | Funktion | Persistenz |
 |---|---|---|
 | **Persönlichkeit** | Werte, Regeln, Kommunikationsstil | soul.yaml — manuell & auto |
 | **Beziehungen** | Nutzer-Erkennung, Vertrauens-Modell, Präferenzen | relations.json — pro Nutzer |
-| **Kernwissen** | Fakten, die über Sessions hinweg bleiben | longterm.json — L3 |
+| **Kernwissen** | Fakten, die über Sessions hinweg bleiben | Git-Memory — L3 |
 | **Eigenheiten** | Humor, Effizienz-Fokus, Deutsch-first | soul.yaml — wächst mit |
 
-Die Seele ist kein gimmick — sie definiert **wer Toti ist**, nicht was er tut. Session-State wird gelöscht; die Seele bleibt.
+Die Seele ist kein Gimmick — sie definiert **wer Nexus ist**, nicht was er tut. Session-State wird gelöscht; die Seele bleibt.
 
-## 5-Department Team (v9.3)
+## 5-Department Team (v10.0)
 
 | Department | Modell | Rolle | Parallel | Profile |
 |---|---|---|---|---|
@@ -610,7 +718,7 @@ Die Seele ist kein gimmick — sie definiert **wer Toti ist**, nicht was er tut.
 | Fallback | Modell | Einsatzgebiet |
 |---|---|---|
 | **Cloud Fallback 1** | `deepseek-v4-flash:cloud` | Schneller Fallback bei Primärmodell-Ausfall |
-| **Cloud Fallback 2** | `glm-5.2:cloud` | Universeller Fallback |
+| **Cloud Fallback 2** | `gemini-3-flash-preview:cloud` | Universeller Fallback |
 
 ### Complexity Routing
 
@@ -651,28 +759,6 @@ Nutzer-Nachricht
            Alle fertig → CEO synthetisiert → Finale Antwort
 ```
 
-## Memory-System
-
-```
-L0 ─ Hot Memory         Immer im Kontext (~800 Tokens), auto-promoted aus L3
- │
-L1 ─ Working Memory     Aktuelle Konversation, auto-getrimmt bei 90% Token-Limit
- │
-L2 ─ Session Memory     Zusammenfassungen vergangener Sessions, 7 Tage TTL
- │
-L3 ─ Long-Term Memory   Wichtige Fakten & Präferenzen, vector+keyword recall, 500 Einträge
- │
-L3-Git ─ Cold Memory    Versionierte .md-Dateien, on-demand geladen, git-versioniert
- │
-L4 ─ Soul               Identität, Beziehungen, Kernwissen — PERMANENT
-```
-
-**L0 Hot Memory** ist der Schlüssel-Unterschied zu v9.2: Die wichtigsten Fakten (importance ≥ 0.8 oder access_count ≥ 3) sind **immer** im System-Prompt, ohne dass der Agent sie erst suchen muss. Nie wieder "ich erinnere mich nicht" bei kritischen Infos.
-
-**L3-Git Cold Memory** speichert Details on-demand in versionierten .md-Dateien. Nur wenn der Agent etwas tiefgreifendes braucht, lädt er die entsprechende Datei. Spart Tokens und ist trotzdem vollständig verfügbar.
-
-Promotion/Demotion: L3 → L0 (auto bei Wichtigkeit/Häufigkeit), L0 → L3 (auto bei Veraltung), L3 → L3-Git (auto bei importance ≥ 0.7).
-
 ## Tools
 
 Alle **produktiv implementiert** — keine Platzhalter, keine Stubs:
@@ -689,17 +775,17 @@ Alle **produktiv implementiert** — keine Platzhalter, keine Stubs:
 | `calculator` | Mathematische Ausdrücke berechnen |
 | `time` | Aktuelle Datum/Zeit |
 | `delegation` | Aufgabe an Team-Abteilung delegieren (single/parallel/full_team) |
-| `memory` | L0→L4 Gedächtnis verwalten (remember/recall/recall_deep/stats) |
+| `memory` | Atlas Memory: search/log/diff/rollback/status |
 
 Tool-Aufrufe erfolgen über XML-Tags im LLM-Output: `<tool>{"tool": "terminal", "command": "ls"}</tool>`
 
 ## Skills
 
-Toti verfügt über **156 Skills** in 22 Kategorien — von DevOps über Creative bis Red Teaming.
+Nexus verfügt über **156 Skills** in 22 Kategorien — von DevOps über Creative bis Red Teaming.
 
 ```mermaid
 graph TB
-    Nexus((NEXUS v9.2<br/>156 Skills))
+    Nexus((NEXUS v10.0<br/>156 Skills))
     devops["🔧 DevOps<br/>33 Skills"]
     Nexus --> devops
     softdev["💻 Software Dev<br/>31 Skills"]
@@ -761,31 +847,28 @@ llm:
     creative: "gemma4:cloud"
     fast: "deepseek-v4-flash:cloud"
 
-  # Cloud-only Fallback (direkt, kein Merge-Proxy)
-  fallback: ["deepseek-v4-flash:cloud", "glm-5.2:cloud"]
+  # Cloud-only Fallback
+  fallback: ["deepseek-v4-flash:cloud", "gemini-3-flash-preview:cloud"]
 
 soul:
   enabled: true                      # Persistente Persönlichkeit + DSGVO
 
 memory:
-  # v9.3: Memory-Fix + Dual-Layer
-  l1_max_tokens: 50000              # GLM-5.2 hat 1M Kontext
-  l2_max_entries: 200                 # 7 Tage Historie
-  l2_max_age_hours: 168
-  l3_max_entries: 500
-  auto_compress: true
-  compress_threshold: 0.9             # erst bei 90% komprimieren
-  # L0 Hot Memory (immer im Kontext)
-  hot_max_tokens: 1000               # ~800 Tokens soft limit
-  hot_max_facts: 10
-  hot_promotion_importance: 0.8      # auto-promote bei importance >= 0.8
-  hot_promotion_access_count: 3      # oder access_count >= 3
-  # L3-Git Cold Memory (versioniert, on-demand)
-  git_enabled: true                  # git versioning
-  git_remote: ""                     # leer = lokal nur
-  git_sync_interval_seconds: 3600    # stündlicher sync
-  vector_search:
-    enabled: true                    # Semantische Suche in L3
+  # Atlas 5-Layer Memory (v10.0)
+  type: git                          # Git-basiert, versioniert
+  repo_path: "/opt/data/memory/git"
+  hot:
+    enabled: true
+    max_tokens: 800
+  session:
+    enabled: true
+    max_context_sessions: 3
+  git:
+    enabled: true
+    sync_interval: 300
+    auto_push: true
+    auto_pull: true
+
 fast_response:
   enabled: true
   hybrid_ack_timeout: 2.0           # Sekunden für Hybrid-Ack-Upgrade
@@ -813,24 +896,25 @@ heartbeat:
   interval: 60                        # Check alle 60s
 ```
 
-Umgebungsvariablen in `.env`: `OLLAMA_API_KEY`, `NEXUS_TG_TOKEN`, `NEXUS_TG_USERS`.
+Umgebungsvariablen in `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `API_SERVER_KEY`.
 
-## v9.1 → v9.2 Migration
+## v9.3 → v10.0 Migration
 
-| | v9.1 | v9.2 |
+| | v9.3 | v10.0 |
 |---|---|---|
-| **Erste Antwort** | Warte auf Worker (2-10s) | Template-Ack < 100ms + Cache < 10ms |
-| **Agenten** | Sequentielle Delegation | Parallel (ThreadPoolExecutor, N Agenten) |
-| **Routing** | Intent nur (trivial/complex) | Intent + Complexity (simple/moderate/complex/critical) |
-| **Agent-Profile** | Hardcoded DEPARTMENTS | Persistente YAML-Profile mit Performance-Tracking |
-| **Auto-Evolution** | Nein | Pattern-basiert (alle 10 Tasks) + LLM-basiert (`/agent evolve`) |
-| **Response Cache** | Nein | Q&A-Cache mit Fuzzy-Match für wiederkehrende Fragen |
-| **Telegram Commands** | /start, /status, /team, /einstellungen | + `/agent` (create, assign, stats, evolve) |
+| **Memory** | L1-L4 + L3-Git Cold Memory | Atlas 5-Layer Git Memory (L0-L4) |
+| **Kompression** | Ja, bei 90% Threshold | **Nie** — relevanz-basiertes Laden |
+| **Versionierung** | Nur L3-Git | **Alle Layer** in Git versioniert |
+| **Rollback** | Nein | `git checkout` zu jeder Version |
+| **Diff** | Nein | `git diff` zwischen Versionen |
+| **Migration** | Nein | Import von Hermes, Mercury, Nova, Claude |
+| **Skills** | 156 in 22 Kategorien | 617 gescannt, 154 importiert, 25 Kategorien |
+| **Modell** | glm-5.2:cloud | glm-5.2:cloud (unverändert) |
 
 ## Entwicklung
 
 ```
-python nexus.py --test     # Self-Test (Imports · Tools · LLM · Soul · Cache)
+python nexus.py --test     # Self-Test (Imports · Tools · LLM · Soul · Memory)
 python nexus.py            # CLI-Modus (interaktiv)
 python nexus.py --telegram # Telegram-Bot (produktiv)
 ```
