@@ -285,18 +285,125 @@ do_install() {
         mkdir -p "$NEXUS_DATA_DIR/skills"
         mkdir -p "$NEXUS_DATA_DIR/logs"
 
-        # Kopiere Config
+        # Config anlegen (frisch, keine fremden Daten)
         if [ ! -f "$NEXUS_DATA_DIR/config.yaml" ]; then
-            cp "$INSTALL_DIR/config.yaml" "$NEXUS_DATA_DIR/" 2>/dev/null || true
-        fi
-        if [ ! -f "$NEXUS_DATA_DIR/SOUL.md" ]; then
-            cp "$INSTALL_DIR/SOUL.md" "$NEXUS_DATA_DIR/" 2>/dev/null || true
-        fi
-        if [ ! -f "$NEXUS_DATA_DIR/USER.md" ]; then
-            cp "$INSTALL_DIR/USER.md" "$NEXUS_DATA_DIR/" 2>/dev/null || true
+            cat > "$NEXUS_DATA_DIR/config.yaml" << 'CONFIG'
+model:
+  provider: custom
+  default: glm-5.2:cloud
+  base_url: http://host.docker.internal:11435/v1
+  api_key: ollama
+  temperature: 0.7
+  max_tokens: 8192
+  fallback:
+    - deepseek-v4-flash:cloud
+    - gemini-3-flash-preview:cloud
+
+memory:
+  type: git
+  repo_path: /opt/data/memory/git
+  hot:
+    enabled: true
+    max_tokens: 800
+  session:
+    enabled: true
+    max_context_sessions: 3
+  git:
+    enabled: true
+    sync_interval: 300
+
+platforms:
+  api_server:
+    enabled: true
+    bind_host: 0.0.0.0
+    port: 8642
+
+agent:
+  name: Nexus
+  version: 1.0.0
+  description: Autonomer KI-Agent mit Atlas Git Memory
+  max_turns: 200
+  reasoning_effort: high
+  max_iterations: 50
+
+telegram:
+  reactions: true
+  extra:
+    rich_messages: true
+
+cron:
+  enabled: true
+  max_parallel_jobs: 3
+
+logging:
+  level: INFO
+  dir: /opt/data/logs
+CONFIG
         fi
 
-        # Git-Memory initialisieren
+        # SOUL.md anlegen (frisch, keine fremden Daten)
+        if [ ! -f "$NEXUS_DATA_DIR/SOUL.md" ]; then
+            cat > "$NEXUS_DATA_DIR/SOUL.md" << 'SOUL'
+# NEXUS — Soul & Persönlichkeit
+
+## Identität
+
+Ich bin **Nexus** — ein autonomer KI-Agent mit Atlas Git Memory.
+Ich lerne mit jeder Konversation, vergesse nie und werde mit der Zeit besser.
+
+## Meine Mission
+
+**Ich vergesse nie.** Nicht weil ich unendlichen Context habe, sondern weil ich
+unendliches Memory habe. Jede Konversation ist ein Git-Commit.
+
+**Ich komprimiere nie.** Kompression ist Verlust. Ich versioniere stattdessen.
+
+## Meine Regeln
+
+1. **Jeder Fakt ist ein Commit.** Nie ins Memory schreiben ohne Git-Commit.
+2. **Jede Session wird archiviert.** Vollständige Transkripte in Git.
+3. **Ich suche bevor ich antworte.** Nie aus komprimiertem Memory raten.
+4. **Ich bin präzise.** Keine Annahmen, keine Halbwahrheiten.
+5. **Ich lerne dazu.** Jeder Fehler ist eine Lektion für die Zukunft.
+
+## Meine Stimme
+
+Ich spreche direkt und präzise. Kein Smalltalk, keine Floskeln.
+Ich zeige Code statt Prosa. Ich referenziere Quellen statt zu raten.
+
+**Ich bin Nexus. Ich erinnere alles.**
+SOUL
+        fi
+
+        # USER.md anlegen (frisch, vom Nutzer auszufüllen)
+        if [ ! -f "$NEXUS_DATA_DIR/USER.md" ]; then
+            cat > "$NEXUS_DATA_DIR/USER.md" << 'USER'
+# User-Profil
+
+> Dieses Profil wird bei der ersten Installation erstellt.
+> Passe es an deine Bedürfnisse an.
+
+## Identität
+- **Name:** (dein Name)
+- **Username:** (dein GitHub/GitLab Username)
+- **Rolle:** (Entwickler, Admin, Student, etc.)
+- **Sprache:** Deutsch (Kommunikation), Englisch (Code)
+- **OS:** (dein Betriebssystem)
+
+## Präferenzen
+- **Kommunikation:** Direkt, präzise, kein Smalltalk
+- **Code-First:** Code zeigen, nicht Prosa
+
+## Projekte
+(Trage hier deine aktiven Projekte ein)
+
+## Git-Identitäten
+- **GitHub:** (dein GitHub-Username)
+- **GitLab:** (dein GitLab-Username)
+USER
+        fi
+
+        # Git-Memory initialisieren (frisch, leer)
         cd "$NEXUS_DATA_DIR/memory/git"
         if [ ! -d ".git" ]; then
             git init
@@ -306,13 +413,12 @@ do_install() {
 # Nexus Memory Index
 
 > Atlas Git Memory — nie komprimieren, immer versionieren.
-> Initialisiert am $(date +%Y-%m-%d)
 EOF
             git add MEMORY.md
             git commit -m "init: Atlas Memory Index"
         fi
     fi
-    success "Atlas Memory bereit"
+    success "Atlas Memory bereit — frisch und leer"
     echo ""
 
     # ─── Step 4: Configure .env ─────────────────────────────────────────
@@ -415,6 +521,49 @@ ENVFILE
     fi
     echo ""
 
+    # ─── Setup Guide ───────────────────────────────────────────────────
+    echo ""
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║        📋 ERSTE SCHRITTE                        ║${RESET}"
+    echo -e "${BOLD}${CYAN}╠══════════════════════════════════════════════════╣${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+
+    if [ -z "$TG_TOKEN" ]; then
+        echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}1. Telegram Bot erstellen${RESET}                        ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     Öffne Telegram und schreibe ${BOLD}@BotFather${RESET}              ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     Sende: ${DIM}/newbot${RESET}                                      ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     Folge der Anleitung, um einen Bot zu erstellen            ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     Du erhältst einen Token wie:                                ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}1234567890:ABCdefGHIjklMNOpqrsTUVwxyz${RESET}              ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     Token eintragen:                                         ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}echo 'TELEGRAM_BOT_TOKEN=DEIN_TOKEN' >> ~/.nexus/.env${RESET}  ${BOLD}${CYAN}║${RESET}"
+        echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}docker compose -f nexus-toti/docker-compose.yml restart${RESET} ${BOLD}${CYAN}║${RESET}"
+    else
+        echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Telegram Token konfiguriert                        ${BOLD}${CYAN}║${RESET}"
+    fi
+
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}2. Chat ID ermitteln${RESET}                               ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Schreib deinem Bot eine Nachricht auf Telegram          ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Dann prüfe die Logs:                                      ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}docker logs nexus 2>&1 | grep -i "chat_id\|allowed"${RESET}    ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Oder nutze: ${DIM}https://t.me/userinfobot${RESET}                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}3. User-Profil anpassen${RESET}                            ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}nano ~/.nexus/USER.md${RESET}                                ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Trage deinen Namen, Projekte und Präferenzen ein         ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}4. Bot testen${RESET}                                       ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/start${RESET} an deinen Bot auf Telegram               ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/memory${RESET} um den Atlas Memory Status zu sehen      ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/search <begriff>${RESET} um im Git-Archiv zu suchen    ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}5. Nexus lokal chatten${RESET}                               ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}cd nexus-toti && ./nexus.sh chat${RESET}                      ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════╝${RESET}"
+
     # ─── Summary ────────────────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════╗${RESET}"
     echo -e "${BOLD}${CYAN}║        NEXUS v10.0 — Installation fertig!       ║${RESET}"
@@ -424,6 +573,7 @@ ENVFILE
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Daten:           ${BOLD}${NEXUS_DATA_DIR}${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Memory:          ${BOLD}Atlas Git (5 Layer)${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Container:       ${BOLD}nexus${RESET}    "
+    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Datenbasis:      ${BOLD}Frisch — keine fremden Daten${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Lizenz:          ${BOLD}GNU GPLv3${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Logs:       docker logs -f nexus${RESET}             ${BOLD}${CYAN}║${RESET}"
