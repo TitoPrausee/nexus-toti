@@ -123,7 +123,9 @@ class GitMemory:
         if self._git_available is False:
             return None
 
-        cmd = ["git", "-C", str(self.repo_path)] + list(args)
+        # Use absolute path for cwd
+        repo_path = str(self.repo_path.resolve())
+        cmd = ["git"] + list(args)
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": self.author_name,
@@ -136,7 +138,7 @@ class GitMemory:
             proc = subprocess.Popen(
                 cmd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=str(self.repo_path)
+                cwd=repo_path
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 
