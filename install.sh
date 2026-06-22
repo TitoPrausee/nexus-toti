@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════════╗
-# ║                    NEXUS v9 — Installer                            ║
-# ║     Autonomous KI-Agent mit Seele und 156 Skills                  ║
+# ║                    NEXUS v10.0 — Installer                          ║
+# ║     Autonomous KI-Agent mit Atlas Git Memory (5 Layer)              ║
 # ║                                                                    ║
 # ║  Usage:                                                            ║
 # ║    curl -fsSL https://raw.githubusercontent.com/***REMOVED***/        ║
@@ -33,8 +33,9 @@ SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
 # ─── Configuration ─────────────────────────────────────────────────────
 REPO_URL="https://github.com/***REMOVED***/nexus-toti.git"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/nexus-toti}"
-IMAGE_NAME="nexus-toti:v9"
-COMPOSE_SERVICE="nexus-telegram"
+NEXUS_DATA_DIR="$HOME/.nexus"
+IMAGE_NAME="nexus-toti:v10"
+COMPOSE_SERVICE="nexus"
 DRY_RUN=false
 UNINSTALL=false
 TG_TOKEN=""
@@ -51,12 +52,12 @@ banner() {
   ║     ███╗   ██╗███████╗██╗  ██╗██╗   ██╗    ║
   ║     ████╗  ██║██╔════╝██║  ██║╚██╗ ██╔╝    ║
   ║     ██╔██╗ ██║█████╗  ███████║ ╚████╔╝     ║
-  ║     ██║╚██╗██║██╔══╝  ██╔══██║  ╚██╔╝      ║
+  ║     ██║╚██╗██║██╔══╝  ██╔══██║  ╚██╔╝     ║
   ║     ██║ ╚████║███████╗██║  ██║   ██║       ║
   ║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝   ╚═╝       ║
   ║                                              ║
-  ║   Autonomous KI-Agent · 156 Skills · v9     ║
-  ║   Seele · 6-Agenten-Team · DSGVO            ║
+  ║   Atlas Git Memory · 5 Layer · v10          ║
+  ║   Keine Kompression · Git-versioniert       ║
   ╚══════════════════════════════════════════════╝
 NEXUSBANNER
     echo -e "${RESET}"
@@ -102,18 +103,6 @@ check_command() {
     else
         return 1
     fi
-}
-
-version_check() {
-    # Returns 0 if $1 >= $2 (semantic version, major.minor)
-    local v1_major v1_minor v2_major v2_minor
-    v1_major=$(echo "$1" | cut -d. -f1)
-    v1_minor=$(echo "$1" | cut -d. -f2)
-    v2_major=$(echo "$2" | cut -d. -f1)
-    v2_minor=$(echo "$2" | cut -d. -f2)
-    [ "$v1_major" -gt "$v2_major" ] && return 0
-    [ "$v1_major" -eq "$v2_major" ] && [ "$v1_minor" -ge "$v2_minor" ] && return 0
-    return 1
 }
 
 # ─── Parse Arguments ────────────────────────────────────────────────────
@@ -192,10 +181,10 @@ do_uninstall() {
     rm -rf "$INSTALL_DIR"
     success "Verzeichnis entfernt"
 
-    # Remove Docker volumes
-    step "Entferne Docker-Volumes..."
-    docker volume rm nexus_data nexus_soul 2>/dev/null || true
-    success "Volumes entfernt"
+    # Remove data directory
+    step "Entferne Daten-Verzeichnis..."
+    rm -rf "$NEXUS_DATA_DIR"
+    success "Daten entfernt"
 
     echo ""
     success "Nexus wurde vollständig deinstalliert."
@@ -232,7 +221,6 @@ do_install() {
     elif docker-compose version &>/dev/null 2>&1; then
         COMPOSE_CMD="docker-compose"
     else
-        # docker exists but compose doesn't
         if check_command docker; then
             missing+=("docker-compose")
         fi
@@ -290,7 +278,44 @@ do_install() {
     success "Code bereit"
     echo ""
 
-    # ─── Step 3: Configure .env ─────────────────────────────────────────
+    # ─── Step 3: Create Data Directory ──────────────────────────────────
+    step "Erstelle Atlas Memory Verzeichnis..."
+    if [ "$DRY_RUN" = false ]; then
+        mkdir -p "$NEXUS_DATA_DIR/memory/git"
+        mkdir -p "$NEXUS_DATA_DIR/skills"
+        mkdir -p "$NEXUS_DATA_DIR/logs"
+
+        # Kopiere Config
+        if [ ! -f "$NEXUS_DATA_DIR/config.yaml" ]; then
+            cp "$INSTALL_DIR/config.yaml" "$NEXUS_DATA_DIR/" 2>/dev/null || true
+        fi
+        if [ ! -f "$NEXUS_DATA_DIR/SOUL.md" ]; then
+            cp "$INSTALL_DIR/SOUL.md" "$NEXUS_DATA_DIR/" 2>/dev/null || true
+        fi
+        if [ ! -f "$NEXUS_DATA_DIR/USER.md" ]; then
+            cp "$INSTALL_DIR/USER.md" "$NEXUS_DATA_DIR/" 2>/dev/null || true
+        fi
+
+        # Git-Memory initialisieren
+        cd "$NEXUS_DATA_DIR/memory/git"
+        if [ ! -d ".git" ]; then
+            git init
+            git config user.name "Nexus"
+            git config user.email "nexus@local"
+            cat > MEMORY.md << 'EOF'
+# Nexus Memory Index
+
+> Atlas Git Memory — nie komprimieren, immer versionieren.
+> Initialisiert am $(date +%Y-%m-%d)
+EOF
+            git add MEMORY.md
+            git commit -m "init: Atlas Memory Index"
+        fi
+    fi
+    success "Atlas Memory bereit"
+    echo ""
+
+    # ─── Step 4: Configure .env ─────────────────────────────────────────
     step "Konfiguriere .env..."
 
     if [ "$DRY_RUN" = true ]; then
@@ -298,15 +323,22 @@ do_install() {
     else
         cd "$INSTALL_DIR"
 
-        if [ -f .env ]; then
+        if [ -f "$NEXUS_DATA_DIR/.env" ]; then
             info ".env bereits vorhanden — behalte bestehende Konfiguration"
         else
-            cp .env.example .env
+            # .env direkt im data dir erstellen
+            cat > "$NEXUS_DATA_DIR/.env" << 'ENVFILE'
+# Nexus Environment
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USERS=
+API_SERVER_KEY=
+OLLAMA_HOST=http://host.docker.internal:11435
+ENVFILE
 
             # Interactive or non-interactive token setup
             if [ -n "$TG_TOKEN" ]; then
-                sed -i.bak "s|^NEXUS_TG_TOKEN=.*|NEXUS_TG_TOKEN=${TG_TOKEN}|" .env
-                rm -f .env.bak
+                sed -i.bak "s|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${TG_TOKEN}|" "$NEXUS_DATA_DIR/.env"
+                rm -f "$NEXUS_DATA_DIR/.env.bak"
             else
                 echo ""
                 echo -e "  ${BOLD}${CYAN}Telegram Bot Token${RESET}"
@@ -314,14 +346,14 @@ do_install() {
                 echo -n "  Token: "
                 read -r token_input
                 if [ -n "$token_input" ]; then
-                    sed -i.bak "s|^NEXUS_TG_TOKEN=.*|NEXUS_TG_TOKEN=${token_input}|" .env
-                    rm -f .env.bak
+                    sed -i.bak "s|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${token_input}|" "$NEXUS_DATA_DIR/.env"
+                    rm -f "$NEXUS_DATA_DIR/.env.bak"
                 fi
             fi
 
             if [ -n "$TG_CHAT_ID" ]; then
-                sed -i.bak "s|^NEXUS_TG_USERS=.*|NEXUS_TG_USERS=${TG_CHAT_ID}|" .env
-                rm -f .env.bak
+                sed -i.bak "s|^TELEGRAM_ALLOWED_USERS=.*|TELEGRAM_ALLOWED_USERS=${TG_CHAT_ID}|" "$NEXUS_DATA_DIR/.env"
+                rm -f "$NEXUS_DATA_DIR/.env.bak"
             else
                 echo ""
                 echo -e "  ${BOLD}${CYAN}Telegram Chat ID${RESET}"
@@ -329,44 +361,32 @@ do_install() {
                 echo -n "  Chat ID: "
                 read -r chat_input
                 if [ -n "$chat_input" ]; then
-                    sed -i.bak "s|^NEXUS_TG_USERS=.*|NEXUS_TG_USERS=${chat_input}|" .env
-                    rm -f .env.bak
+                    sed -i.bak "s|^TELEGRAM_ALLOWED_USERS=.*|TELEGRAM_ALLOWED_USERS=${chat_input}|" "$NEXUS_DATA_DIR/.env"
+                    rm -f "$NEXUS_DATA_DIR/.env.bak"
                 fi
             fi
 
-            # Set Ollama host
-            sed -i.bak "s|^OLLAMA_HOST=.*|OLLAMA_HOST=${OLLAMA_HOST}|" .env
-            rm -f .env.bak
+            # API Key generieren
+            local api_key
+            api_key=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || echo "dev-key-$(date +%s)")
+            sed -i.bak "s|^API_SERVER_KEY=.*|API_SERVER_KEY=${api_key}|" "$NEXUS_DATA_DIR/.env"
+            rm -f "$NEXUS_DATA_DIR/.env.bak"
+
+            # Ollama host
+            sed -i.bak "s|^OLLAMA_HOST=.*|OLLAMA_HOST=${OLLAMA_HOST}|" "$NEXUS_DATA_DIR/.env"
+            rm -f "$NEXUS_DATA_DIR/.env.bak"
         fi
     fi
     success "Konfiguration bereit"
     echo ""
 
-    # ─── Step 4: Build Docker Image ──────────────────────────────────────
-    step "Baue Docker-Image..."
-    echo -e "  ${DIM}Dies kann einige Minuten dauern (erster Build)...${RESET}"
-
-    if [ "$DRY_RUN" = true ]; then
-        info "DRY RUN: ${COMPOSE_CMD} build nexus-telegram"
-    else
-        cd "$INSTALL_DIR"
-        if ${COMPOSE_CMD} build nexus-telegram 2>&1 | tail -5; then
-            success "Image gebaut: ${IMAGE_NAME}"
-        else
-            error "Build fehlgeschlagen!"
-            echo -e "  ${DIM}Prüfe Docker-Logs mit: docker compose logs${RESET}"
-            exit 1
-        fi
-    fi
-    echo ""
-
     # ─── Step 5: Start Container ────────────────────────────────────────
     step "Starte Nexus..."
     if [ "$DRY_RUN" = true ]; then
-        info "DRY RUN: ${COMPOSE_CMD} up -d nexus-telegram"
+        info "DRY RUN: ${COMPOSE_CMD} up -d"
     else
         cd "$INSTALL_DIR"
-        ${COMPOSE_CMD} up -d nexus-telegram 2>&1 | tail -3
+        ${COMPOSE_CMD} up -d 2>&1 | tail -3
     fi
     success "Container gestartet"
     echo ""
@@ -377,7 +397,7 @@ do_install() {
         local retries=0
         local max_retries=15
         while [ $retries -lt $max_retries ]; do
-            if docker ps --filter "name=nexus-toti-telegram" --filter "health=healthy" --format "{{.Names}}" | grep -q "nexus"; then
+            if docker ps --filter "name=nexus" --filter "health=healthy" --format "{{.Names}}" | grep -q "nexus"; then
                 break
             fi
             printf "\r  ${CYAN}${SPINNER[$((retries % 10))]}${RESET} Warte auf Health-Check... (%d/%d)   " $((retries + 1)) $max_retries
@@ -388,7 +408,7 @@ do_install() {
 
         if [ $retries -eq $max_retries ]; then
             warn "Health-Check Timeout — Container läuft aber evtl. noch beim Starten"
-            echo -e "  ${DIM}Prüfe mit: docker logs nexus-toti-telegram${RESET}"
+            echo -e "  ${DIM}Prüfe mit: docker logs nexus${RESET}"
         else
             success "Container ist gesund (healthy)"
         fi
@@ -397,18 +417,18 @@ do_install() {
 
     # ─── Summary ────────────────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════╗${RESET}"
-    echo -e "${BOLD}${CYAN}║           NEXUS v9 — Installation fertig!        ║${RESET}"
+    echo -e "${BOLD}${CYAN}║        NEXUS v10.0 — Installation fertig!       ║${RESET}"
     echo -e "${BOLD}${CYAN}╠══════════════════════════════════════════════════╣${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Installiert in:  ${BOLD}${INSTALL_DIR}${RESET}    "
-    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Docker-Image:   ${BOLD}${IMAGE_NAME}${RESET}    "
-    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Container:       ${BOLD}nexus-toti-telegram${RESET}    "
-    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Skills:          ${BOLD}156${RESET}    "
+    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Daten:           ${BOLD}${NEXUS_DATA_DIR}${RESET}    "
+    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Memory:          ${BOLD}Atlas Git (5 Layer)${RESET}    "
+    echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Container:       ${BOLD}nexus${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}  ${GREEN}✓${RESET}  Lizenz:          ${BOLD}GNU GPLv3${RESET}    "
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Logs:       docker logs -f nexus-toti-telegram${RESET}  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Stoppen:    docker compose stop${RESET}                  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Neustarten: docker compose restart${RESET}              ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Logs:       docker logs -f nexus${RESET}             ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Chat:       ./nexus.sh chat${RESET}                   ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Memory:     ./nexus.sh memory status${RESET}           ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}  ${DIM}Deinstall:  curl ... | bash -s -- --uninstall${RESET}   ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}Sende /start an deinen Bot auf Telegram!${RESET}       ${BOLD}${CYAN}║${RESET}"
