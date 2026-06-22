@@ -10,9 +10,9 @@ nexus:
 # ─── LLM ROUTING ────────────────────────────────────────
 llm:
   # Ollama Cloud Merge Proxy — round-robin across 2 accounts, no local fallback
-  base_url: "http://host.docker.internal:11435"  # Merge Proxy (Cloud-only)
-  local_url: "http://host.docker.internal:11435"  # Same proxy — cloud-only setup
-  api_key_env: "OLLAMA_API_KEY"
+  base_url: "http://host.docker.internal:11434"  # Lokales Ollama direkt
+  local_url: "http://host.docker.internal:11434"  # Lokales Ollama direkt
+  api_key_env: ""  # Kein API-Key nötig für lokales Ollama
   mode: "cloud"  # cloud ONLY — no local fallback
 
   # Primary model — fast, smart, German-capable
@@ -48,13 +48,13 @@ memory:
   # L2: Session memory (recent conversations, summarized)
   # L3: Long-term memory (important facts, user preferences)
   # L4: Soul memory (identity, relationships, core knowledge)
-  l1_max_tokens: 8000
-  l2_max_entries: 50
-  l2_max_age_hours: 48
-  l3_max_entries: 200
+  l1_max_tokens: 50000          # 8000→50000: GLM-5.1 hat 200K Kontext, 8K war zu restriktiv
+  l2_max_entries: 200           # 50→200: mehr Session-Historie behalten
+  l2_max_age_hours: 168         # 48→168h (7 Tage): Kontext über mehrere Tage behalten
+  l3_max_entries: 500           # 200→500: mehr Langzeitfakten speichern
   l4_permanent: true
   auto_compress: true
-  compress_threshold: 0.7  # compress when L1 is 70% full
+  compress_threshold: 0.9       # 0.7→0.9: erst bei 90% Füllstand komprimieren, nicht bei 70%
 
   # Vector search for L3 semantic recall (v7.2)
   # Uses sentence-transformers for embedding-based similarity search
@@ -111,12 +111,12 @@ session_manager:
 
 # ─── PERFORMANCE ─────────────────────────────────────────
 performance:
-  # Token budgets — tight limits for fast responses
-  max_tokens_per_turn: 6000
-  max_tokens_per_conversation: 80000
-  max_tool_calls_per_turn: 6       # was 15 — cuts loops short
-  max_duplicate_calls: 2           # was 3 — fail faster on repeats
-  max_chain_repeats: 1            # was 2 — break circular chains immediately
+  # Token budgets — raised limits to prevent premature context loss
+  max_tokens_per_turn: 12000        # 6000→12000: enough room for tool results + reasoning
+  max_tokens_per_conversation: 160000  # 80000→160000: GLM-5.1 hat 200K, nutzen wir
+  max_tool_calls_per_turn: 10       # 6→10: mehr Tool-Aufrufe pro Runde erlaubt
+  max_duplicate_calls: 3            # 2→3: nicht zu früh abbrechen
+  max_chain_repeats: 2              # 1→2: etwas mehr Persistenz bei Tool-Ketten
 
   # Speed — respond immediately, think in background
   fast_acknowledge: true       # Send "thinking..." within 0.5s

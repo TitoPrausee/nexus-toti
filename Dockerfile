@@ -53,7 +53,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     NEXUS_LOG_LEVEL=INFO \
     NEXUS_LOG_FORMAT=text \
-    OLLAMA_HOST=http://host.docker.internal:11435
+    OLLAMA_HOST=http://host.docker.internal:11434
 
 # Health check — uses lightweight import test (no LLM call)
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \

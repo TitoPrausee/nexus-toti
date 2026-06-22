@@ -260,8 +260,9 @@ class MemorySystem:
         if len(self.l1) < 4:
             return
 
-        # Keep first (system prompt) and last 60%
-        keep_count = max(2, int(len(self.l1) * 0.6))
+        # Keep first (system prompt) and last 85% — much more conservative than 60%
+        # v7.4: was 0.6 (lost recent context after just a few messages), now 0.85
+        keep_count = max(2, int(len(self.l1) * 0.85))
         mid = self.l1[1:-keep_count]
         kept = [self.l1[0]] + self.l1[-keep_count:]
 
