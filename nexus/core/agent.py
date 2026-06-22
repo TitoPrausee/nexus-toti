@@ -220,6 +220,14 @@ class NexusAgent:
         # 1. Soul identity
         parts.append(self.soul.get_system_prompt(user_id))
 
+        # 1.5 Hot memory (L0) — always in context
+        try:
+            hot_text = self.memory.hot_memory.get_prompt_text(user_id=user_id)
+            if hot_text:
+                parts.append(hot_text)
+        except Exception:
+            pass  # Hot memory is optional, never crash
+
         # 2. Platform context (Hermes-inspired)
         platform_info = {
             "telegram": "Du bist auf Telegram. Kurze, knackige Antworten. Kein Markdown-Rendering außer **fett**. Emojis sparsam einsetzen.",
@@ -250,6 +258,7 @@ class NexusAgent:
             f"\n{self._no_meta_rule}\n"
             f"{self._security_rule}\n\n"
             f"Tools: terminal, file_read, file_write, file_search, web_search, web_fetch, code_exec, delegation, memory, calculator, time\n"
+            f"Memory-Actions: add/remember (speichern), recall (suchen), recall_deep (Git-Memory voll laden), read (lesen), stats\n"
             f"Format: {TOOL_START}"
             + '{"tool": "name", ...args}'
             + f"{TOOL_END}\n"
@@ -872,12 +881,43 @@ class NexusAgent:
         elif action == "recall":
             query = args.get("content", "")
             results = self.memory.recall(query)
+
+            # Also search L3-Git cold memory
+            try:
+                git_results = self.memory.git_memory.search(query, limit=3)
+                if git_results:
+                    for path, excerpt in git_results:
+                        results.append(f"[Git: {path}] {excerpt[:200]}")
+            except Exception:
+                pass  # Git memory is optional
+
             if results:
                 return ToolResult(True, "Erinnerungen:\n" + "\n".join(f"- {r}" for r in results))
             return ToolResult(True, "Keine Erinnerungen gefunden.")
+        elif action == "recall_deep":
+            # Load full content of a specific git memory file
+            path = args.get("path", "")
+            if not path:
+                # List available files if no path given
+                try:
+                    files = self.memory.git_memory.list_files()
+                    if files:
+                        return ToolResult(True, "Verfuegbare Git-Memory-Dateien:\n" + "\n".join(f"- {f}" for f in files))
+                    return ToolResult(True, "Keine Git-Memory-Dateien vorhanden.")
+                except Exception:
+                    return ToolResult(True, "Git-Memory nicht verfuegbar.")
+            try:
+                content = self.memory.git_memory.load_file(path)
+                if content:
+                    return ToolResult(True, f"[{path}]\n{content}")
+                return ToolResult(False, "", f"Datei nicht gefunden: {path}")
+            except Exception as e:
+                return ToolResult(False, "", f"Fehler beim Laden: {e}")
         elif action == "stats":
             stats = self.memory.stats()
-            return ToolResult(True, f"Memory: L1={stats['l1_entries']}, L2={stats['l2_entries']}, L3={stats['l3_entries']}")
+            hot = stats.get("hot_memory", {})
+            git = stats.get("git_memory", {})
+            return ToolResult(True, f"Memory: L0={hot.get('facts', 0)} facts ({hot.get('tokens_estimate', 0)} tokens), L1={stats['l1_entries']}, L2={stats['l2_entries']}, L3={stats['l3_entries']}, Git={git.get('files', 0)} files")
         return ToolResult(False, "", f"Unknown memory action: {action}")
 
     def _handle_delegation(self, args):

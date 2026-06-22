@@ -30,9 +30,10 @@ RUN groupadd --gid 1000 nexus && \
 
 WORKDIR /app
 
-# System deps — only curl for health checks
+# System deps — curl for health checks, git for cold memory versioning
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from builder

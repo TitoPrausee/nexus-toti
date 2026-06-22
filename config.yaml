@@ -64,6 +64,21 @@ memory:
     similarity_threshold: 0.3  # minimum cosine similarity for results
     max_results: 10  # max results from vector search before filtering
 
+  # L0: Hot Memory (always in context, ~800 tokens)
+  hot_max_tokens: 1000           # Hard token budget for hot memory prompt
+  hot_max_facts: 10              # Max critical facts in hot memory
+  hot_promotion_importance: 0.8  # Min importance for auto-promotion to hot memory
+  hot_promotion_access_count: 3  # Min access count for auto-promotion
+  hot_demotion_age_days: 30     # Days before a fact can be demoted
+  hot_demotion_stale_days: 7    # Days without access before demotion
+
+  # L3-Git: Cold Memory (versioned, on-demand)
+  git_enabled: true              # Enable git versioning (set false for file-only mode)
+  git_remote: ""                 # Remote URL for push/pull (empty = local only)
+  git_sync_interval_seconds: 3600  # How often to push/pull (seconds)
+  git_author_name: "Nexus"       # Git commit author name
+  git_author_email: "nexus@local"  # Git commit author email
+
 # ─── TOOLS ──────────────────────────────────────────────
 tools:
   enabled:

@@ -49,17 +49,18 @@ class MemoryEntry:
 
 class MemorySystem:
     """
-    4-layer memory inspired by human cognition.
+    5-layer memory inspired by human cognition.
 
+    L0 (Hot): Always-in-context facts — auto-promoted from L3, ~800 tokens
     L1 (Working): Current conversation — auto-trimmed to fit token budget
     L2 (Session): Recent conversations, summarized for context
     L3 (Long-term): Important facts, user preferences, learned patterns
     L4 (Soul): Identity, relationships — managed by SoulEngine
 
-    v7.3 improvements:
+    v9.3 improvements:
+    - L0 Hot Memory: critical facts always in context, auto-promoted from L3
+    - L3-Git Cold Memory: versioned .md files, loaded on-demand
     - Query-aware L2 context selection: scores sessions by topic relevance
-      to the current query, not just recency. Sessions about the same topic
-      are prioritized even if they're older.
     - L3 vector search using sentence-transformers for semantic similarity
     - Hybrid scoring: 60% vector similarity + 40% keyword matching
     - Graceful fallback to keyword-only search if model unavailable
@@ -95,6 +96,16 @@ class MemorySystem:
 
         self._load()
 
+        # L0: Hot Memory (always in context, auto-promoted from L3)
+        from nexus.core.hot_memory import HotMemory
+        self.hot_memory = HotMemory(data_dir=str(self.data_dir), config=cfg)
+        # Initial sync from L3
+        self.hot_memory.sync_from_l3(self.l3)
+
+        # L3-Git: Cold Memory (versioned, on-demand)
+        from nexus.core.git_memory import GitMemory
+        self.git_memory = GitMemory(data_dir=str(self.data_dir), config=cfg)
+
     def _load(self):
         """Load L2 and L3 from disk."""
         l2_file = self.data_dir / "session.json"
@@ -108,12 +119,15 @@ class MemorySystem:
                 self.l3 = json.load(f)
 
     def save(self):
-        """Persist L2 and L3."""
+        """Persist L2, L3, and hot memory."""
         with open(self.data_dir / "session.json", "w", encoding="utf-8") as f:
             json.dump(self.l2, f, ensure_ascii=False, indent=2)
 
         with open(self.data_dir / "longterm.json", "w", encoding="utf-8") as f:
             json.dump(self.l3, f, ensure_ascii=False, indent=2)
+
+        # Persist hot memory
+        self.hot_memory.save()
 
     # ─── L1: Working Memory ────────────────────────────
 
@@ -492,6 +506,11 @@ class MemorySystem:
         # Re-index for vector search (new entry added)
         self._index_vector_store()
 
+        # Sync to hot memory (L0) and git memory (L3-Git)
+        if importance >= 0.7:
+            self._sync_to_git(entry)
+        self.hot_memory.sync_from_l3(self.l3)
+
     def recall(self, query: str, limit: int = 5) -> list[str]:
         """Recall from long-term memory using hybrid search.
 
@@ -561,6 +580,9 @@ class MemorySystem:
 
         if results:
             self.save()
+
+        # Sync hot memory after recall (access counts updated)
+        self.hot_memory.sync_from_l3(self.l3)
 
         return results
 
@@ -731,6 +753,24 @@ class MemorySystem:
         self.l1 = []
         self.save()
 
+        # Create git session summary
+        try:
+            self.git_memory.create_session_summary(summary)
+        except Exception as e:
+            log.warning(f"Failed to create git session summary: {e}")
+
+        # Update hot memory recent sessions
+        try:
+            sessions_data = []
+            for sess in self.l2[-3:]:
+                sessions_data.append({
+                    "topics": sess.get("topics", []),
+                    "date": time.strftime("%Y-%m-%d", time.localtime(sess.get("timestamp", time.time()))),
+                })
+            self.hot_memory.update_recent_sessions(sessions_data)
+        except Exception as e:
+            log.warning(f"Failed to update hot memory sessions: {e}")
+
     def clear(self):
         """Clear L1 only (keep L2 and L3)."""
         self.l1 = []
@@ -756,9 +796,47 @@ class MemorySystem:
             "l3_total_accesses": sum(e.get("access_count", 0) for e in self.l3),
             "l3_avg_importance": round(sum(e.get("importance", 0.5) for e in self.l3) / max(1, len(self.l3)), 2),
         }
+        # Add hot memory stats
+        try:
+            base_stats["hot_memory"] = self.hot_memory.stats()
+        except Exception:
+            base_stats["hot_memory"] = {"enabled": False}
+        # Add git memory stats
+        try:
+            base_stats["git_memory"] = self.git_memory.stats()
+        except Exception:
+            base_stats["git_memory"] = {"enabled": False}
         # Add vector store stats
         try:
             base_stats["vector_store"] = self.vector_store.stats()
         except Exception:
             base_stats["vector_store"] = {"enabled": False, "model_loaded": False}
         return base_stats
+
+    def _sync_to_git(self, entry: dict):
+        """Sync a high-importance L3 entry to the appropriate git memory file.
+
+        Only syncs entries with importance >= 0.7 to avoid cluttering git memory
+        with low-value facts.
+        """
+        category = entry.get("category", "general")
+        content = entry.get("content", "")
+        importance = entry.get("importance", 0.5)
+
+        if importance < 0.7 or not content:
+            return
+
+        # Map category to git file path
+        category_map = {
+            "technical": "learnings/python-bugs.md",
+            "config": "infrastructure/docker.md",
+            "decision": "decisions/api-design.md",
+            "user_identity": "projects/nexus.md",
+            "identity": "projects/nexus.md",
+            "infrastructure": "infrastructure/docker.md",
+            "project": "projects/nexus.md",
+        }
+
+        file_path = category_map.get(category)
+        if file_path:
+            self.git_memory.append_fact(file_path, content, category, importance)

@@ -218,6 +218,14 @@ class HeartbeatSystem:
                 # Check memory
                 self.check_memory()
 
+                # Sync git memory (periodic push/pull)
+                if self.health.heartbeat_count % 10 == 0:  # Every ~50min at 5min interval
+                    try:
+                        if hasattr(self.agent, 'memory') and hasattr(self.agent.memory, 'git_memory'):
+                            self.agent.memory.git_memory.maybe_sync()
+                    except Exception as e:
+                        log.warning(f"[HEARTBEAT] Git memory sync failed: {e}")
+
                 # Cleanup old sessions (every 6th heartbeat = ~30min)
                 if self.health.heartbeat_count % 6 == 0:
                     self.cleanup_old_sessions()
