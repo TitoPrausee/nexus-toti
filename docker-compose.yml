@@ -13,7 +13,7 @@ services:
       - OLLAMA_MODEL=glm-5.2:cloud
       - NEXUS_LOG_LEVEL=INFO
       - NEXUS_DATA_DIR=/opt/data
-      - API_SERVER_KEY=${API_SERVER_KEY:-}
+      - API_SERVER_KEY=fdc43a344ca36e1520c3d4eb02e5e18a4fef0ee6c2887fd7151557db357d4ed2
     command: gateway run
     stdin_open: true
     tty: true
