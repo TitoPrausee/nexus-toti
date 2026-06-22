@@ -74,13 +74,12 @@ class PairRouter:
     ]
 
     COMPLEX_KEYWORDS = {
-        "code", "programmier", "implementier", "refactor", "debug", "fix",
-        "erstelle", "schreibe", "analysier", "recherchier", "vergleiche",
-        "architektur", "design", "deploy", "erkläre wie", "warum funktioniert",
-        "baue", "entwickle", "optimier", "migrat",
-        "kannst du", "kannst", "kann", "mache", "mach", "tun", "hilfe", "help",
-        "verbind", "verknüpf", "connect", "link", "gitlab", "github", "api",
-        "skill", "fähig", "feature", "funktion",
+        "programmier", "implementier", "refactor", "debug", "fix bug",
+        "erstelle mir", "schreibe mir code", "analysier code", "recherchier und vergleiche",
+        "architektur design", "deploy auf", "erkläre wie das funktioniert",
+        "baue mir", "entwickle ein", "optimier den code", "migrat die datenbank",
+        "gitlab pipeline", "github actions", "api endpoint erstellen",
+        "skill erstellen", "feature implementieren", "funktion hinzufügen",
     }
 
     CRITICAL_KEYWORDS = {
@@ -169,96 +168,78 @@ class PairRouter:
         has_question_mark = "?" in user_message
         # Check trivial patterns FIRST for known smalltalk (e.g. "was geht", "wie geht")
         trivial = self._trivial_response(msg_lower)
-        # Any real question (not matched trivial) needs Worker
+        # Questions are NOT automatically complex — simple questions get answered directly.
+        # Only route to Worker if the question is clearly multi-step or technical.
+        # Short questions (<=15 words) with a single question word → answer directly (no Worker)
         if (question_count >= 1 or has_question_mark) and not trivial:
-            return RoutingDecision(
-                intent=IntentType.COMPLEX,
-                confidence=0.75,
-                needs_worker=True,
-                model_key="default",
-                context_compression="summary",
-                max_worker_tokens=self.worker_max_tokens,
-                complexity="moderate",
-            )
+            # Multi-question or long questions → Worker needed
+            if question_count >= 2 or word_count > 30:
+                return RoutingDecision(
+                    intent=IntentType.COMPLEX,
+                    confidence=0.75,
+                    needs_worker=True,
+                    model_key="default",
+                    context_compression="summary",
+                    max_worker_tokens=self.worker_max_tokens,
+                    complexity="moderate",
+                )
+            # Simple single question → Router can answer directly (no delegation)
+            # falls through to LLM classification below
 
-        # Short single-topic messages without keywords -> check trivial patterns first (free, no LLM)
-        # Multi-clause messages (with . ! ? separating thoughts) need LLM context
+        # ── FAST PATH: Short messages (<=15 words) without complex keywords ──
+        # No LLM call needed — the main model can handle these directly.
+        # This eliminates the _classify_and_route_via_llm overhead that was causing slow responses.
         has_multi_clauses = any(sep in user_message for sep in [". ", "! ", "? "]) and word_count > 5
         if word_count <= 15 and complex_hits == 0 and not has_multi_clauses:
-            trivial = self._trivial_response(msg_lower)
-            if trivial:
-                return RoutingDecision(
-                    intent=IntentType.TRIVIAL,
-                    confidence=0.9,
-                    router_response=trivial,
-                    needs_worker=False,
-                    context_compression="recent",
-                    complexity="simple",
-                )
-            # No pattern match — still short, ask Router LLM
-            # If the LLM can't give a short trivial answer, route to Worker
-            llm_response = self._classify_and_route_via_llm(user_message)
-            # If LLM response is very short (<=20 chars) and looks like an ack, keep trivial
-            # Otherwise this is a real question that needs Worker
-            if len(llm_response.strip()) <= 20 and not llm_response.strip().endswith("?"):
-                return RoutingDecision(
-                    intent=IntentType.TRIVIAL,
-                    confidence=0.6,
-                    router_response=llm_response,
-                    needs_worker=False,
-                    context_compression="recent",
-                    complexity="simple",
-                )
-            # LLM gave a substantive response — needs Worker
+            # Already checked trivial patterns above — if we're here, it's a short
+            # question or statement the main model should answer directly (no Worker delegation)
             return RoutingDecision(
-                intent=IntentType.COMPLEX,
+                intent=IntentType.TOOL_BASED,
                 confidence=0.7,
-                needs_worker=True,
+                needs_worker=False,  # Main model handles directly — no Worker needed
                 model_key="default",
-                context_compression="summary",
-                max_worker_tokens=self.worker_max_tokens,
-                complexity="moderate",
+                context_compression="recent",
+                complexity="simple",
             )
 
-        # Medium messages without clear intent -> Router decides
+        # ── MEDIUM PATH: Messages 16-40 words without complex keywords ──
+        # Main model can handle these too — only delegate if multi-clause or complex.
+        if word_count <= 40 and complex_hits == 0:
+            if has_multi_clauses:
+                # Multi-clause: needs Worker for coherent multi-step handling
+                return RoutingDecision(
+                    intent=IntentType.COMPLEX,
+                    confidence=0.65,
+                    needs_worker=True,
+                    model_key="default",
+                    context_compression="summary",
+                    max_worker_tokens=min(self.worker_max_tokens, 2048),
+                    complexity="moderate",
+                )
+            # Single-clause medium message — main model handles it
+            return RoutingDecision(
+                intent=IntentType.TOOL_BASED,
+                confidence=0.7,
+                needs_worker=False,  # Direct answer, no delegation
+                model_key="default",
+                context_compression="recent",
+                complexity="simple",
+            )
+
+        # ── DEFAULT: Long or keyword-heavy messages need Worker ──
         return RoutingDecision(
-            intent=IntentType.TOOL_BASED,
-            confidence=0.5,
+            intent=IntentType.COMPLEX,
+            confidence=0.7,
             needs_worker=True,
             model_key="default",
-            plan="Medium complexity - Worker will handle with standard budget",
-            context_compression="recent",
-            max_worker_tokens=min(self.worker_max_tokens, 2048),
+            context_compression="summary",
+            max_worker_tokens=self.worker_max_tokens,
             complexity="moderate",
         )
 
-    def _classify_and_route_via_llm(self, user_message):
-        from datetime import datetime
-        now = datetime.now()
-
-        messages = [
-            Message("system",
-                "Du bist ein Router. Antworte KURZ (max 3 Worte) oder schreibe ROUTE_TO_WORKER bei komplexen Fragen. "
-                "Keine Erklaerungen, keine Einleitungen."),
-            Message("user", user_message),
-        ]
-
-        response = self.llm.chat(
-            messages,
-            model_key=self.router_model,
-            max_tokens=min(self.router_max_tokens, 64),  # Router needs max 64 tokens
-        )
-
-        content = response.content.strip()
-
-        if "ROUTE_TO_WORKER" in content:
-            return ""
-
-        # If response is too long for a trivial answer, route to worker
-        if len(content) > 100:
-            return ""
-
-        return content
+    # NOTE: _classify_and_route_via_llm removed in v9.3 — it added 2-5s latency
+    # for every short message. Classification is now fully deterministic via
+    # keyword matching and message length heuristics. No LLM call for routing.
 
     # Patterns that match the ENTIRE message (exact or near-exact)
     # These must NOT match partial words in longer messages
