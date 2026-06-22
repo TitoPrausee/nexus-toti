@@ -49,15 +49,16 @@ banner() {
     echo -e "${CYAN}${BOLD}"
     cat << 'NEXUSBANNER'
   ╔══════════════════════════════════════════════╗
-  ║     ███╗   ██╗███████╗██╗  ██╗██╗   ██╗    ║
-  ║     ████╗  ██║██╔════╝██║  ██║╚██╗ ██╔╝    ║
-  ║     ██╔██╗ ██║█████╗  ███████║ ╚████╔╝     ║
-  ║     ██║╚██╗██║██╔══╝  ██╔══██║  ╚██╔╝     ║
-  ║     ██║ ╚████║███████╗██║  ██║   ██║       ║
-  ║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝   ╚═╝       ║
+  ║                                              ║
+  ║   ███╗   ██╗███████╗██╗  ██╗██╗   ██╗     ║
+  ║   ████╗  ██║██╔════╝╚██╗██╔╝╚██╗ ██╔╝     ║
+  ║   ██╔██╗ ██║█████╗   ╚███╔╝  ╚████╔╝      ║
+  ║   ██║╚██╗██║██╔══╝   ██╔██╗   ╚██╔╝       ║
+  ║   ██║ ╚████║███████╗██╔╝ ██╗   ██║        ║
+  ║   ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝   ╚═╝        ║
   ║                                              ║
   ║   Atlas Git Memory · 5 Layer · v10          ║
-  ║   Keine Kompression · Git-versioniert       ║
+  ║   Keine Kompression · Immer versioniert     ║
   ╚══════════════════════════════════════════════╝
 NEXUSBANNER
     echo -e "${RESET}"
@@ -486,7 +487,58 @@ ENVFILE
     success "Konfiguration bereit"
     echo ""
 
-    # ─── Step 5: Start Container ────────────────────────────────────────
+    # ─── Step 5: Ollama Cloud Login ─────────────────────────────────────
+    step "Prüfe Ollama Cloud Verbindung..."
+    if [ "$DRY_RUN" = false ]; then
+        # Prüfe ob glm-5.2:cloud verfügbar ist
+        if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+            if curl -s http://localhost:11434/api/tags 2>/dev/null | grep -q "glm-5.2:cloud"; then
+                success "glm-5.2:cloud verfügbar"
+            else
+                warn "glm-5.2:cloud nicht gefunden — versuche zu pullen..."
+                echo -e "  ${DIM}ollama pull glm-5.2:cloud${RESET}"
+                ollama pull glm-5.2:cloud 2>&1 | tail -1 || {
+                    warn "Ollama Cloud Login erforderlich!"
+                    echo ""
+                    echo -e "  ${BOLD}Ollama Cloud einrichten:${RESET}"
+                    echo -e "  1. Registrieren: ${CYAN}https://ollama.com/settings${RESET}"
+                    echo -e "  2. Login:       ${CYAN}ollama pull glm-5.2:cloud${RESET}"
+                    echo -e "  3. Oder API Key in ~/.nexus/.env setzen:"
+                    echo -e "     ${DIM}OLLAMA_API_KEY=dein_key${RESET}"
+                    echo ""
+                }
+            fi
+        else
+            warn "Ollama nicht erreichbar (http://localhost:11434)"
+            echo -e "  ${DIM}Stelle sicher dass Ollama läuft: ollama serve${RESET}"
+        fi
+    else
+        info "DRY RUN: would check Ollama Cloud connection"
+    fi
+    echo ""
+
+    # ─── Step 6: Telegram Bot Test ───────────────────────────────────────
+    if [ -n "$TG_TOKEN" ] || grep -q "TELEGRAM_BOT_TOKEN=." "$NEXUS_DATA_DIR/.env" 2>/dev/null; then
+        step "Prüfe Telegram Bot Token..."
+        if [ "$DRY_RUN" = false ]; then
+            local token_to_test="${TG_TOKEN:-$(grep '^TELEGRAM_BOT_TOKEN=' "$NEXUS_DATA_DIR/.env" | cut -d= -f2)}"
+            local tg_test
+            tg_test=$(curl -s "https://api.telegram.org/bot${token_to_test}/getMe" 2>/dev/null)
+            if echo "$tg_test" | grep -q '"ok":true'; then
+                local bot_name
+                bot_name=$(echo "$tg_test" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('first_name','Bot'))" 2>/dev/null)
+                success "Telegram Bot '${bot_name}' ist gültig"
+            else
+                warn "Telegram Bot Token scheint ungültig — prüfe den Token bei @BotFather"
+                echo -e "  ${DIM}Token: ${token_to_test:0:20}...${RESET}"
+            fi
+        else
+            info "DRY RUN: would verify Telegram bot token"
+        fi
+    fi
+    echo ""
+
+    # ─── Step 7: Start Container ────────────────────────────────────────
     step "Starte Nexus..."
     if [ "$DRY_RUN" = true ]; then
         info "DRY RUN: ${COMPOSE_CMD} up -d"
@@ -497,7 +549,7 @@ ENVFILE
     success "Container gestartet"
     echo ""
 
-    # ─── Step 6: Health Check ────────────────────────────────────────────
+    # ─── Step 8: Health Check ────────────────────────────────────────────
     step "Health-Check..."
     if [ "$DRY_RUN" = false ]; then
         local retries=0
@@ -550,16 +602,20 @@ ENVFILE
     echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}docker logs nexus 2>&1 | grep -i "chat_id\|allowed"${RESET}    ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     Oder nutze: ${DIM}https://t.me/userinfobot${RESET}                  ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}3. User-Profil anpassen${RESET}                            ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}3. Ollama Cloud Login${RESET}                                ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}ollama pull glm-5.2:cloud${RESET}                              ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}     (Einmalig, für Cloud-Modelle erforderlich)                   ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}4. User-Profil anpassen${RESET}                            ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}nano ~/.nexus/USER.md${RESET}                                ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     Trage deinen Namen, Projekte und Präferenzen ein         ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}4. Bot testen${RESET}                                       ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}5. Bot testen${RESET}                                       ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/start${RESET} an deinen Bot auf Telegram               ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/memory${RESET} um den Atlas Memory Status zu sehen      ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     Sende ${DIM}/search <begriff>${RESET} um im Git-Archiv zu suchen    ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
-    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}5. Nexus lokal chatten${RESET}                               ${BOLD}${CYAN}║${RESET}"
+    echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}6. Nexus lokal chatten${RESET}                               ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}     ${DIM}cd nexus-toti && ./nexus.sh chat${RESET}                      ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}║${RESET}                                                  ${BOLD}${CYAN}║${RESET}"
     echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════╝${RESET}"
