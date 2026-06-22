@@ -124,7 +124,7 @@ class PairRouter:
                 needs_worker=True,
                 model_key="default",
                 plan="Delegation task detected",
-                context_compression="summary",
+                context_compression="recent",  # No extra LLM call for summary
                 max_worker_tokens=self.worker_max_tokens,
                 complexity="complex",
             )
@@ -158,7 +158,7 @@ class PairRouter:
                 confidence=0.8,
                 needs_worker=True,
                 model_key="default",
-                context_compression="summary",
+                context_compression="recent",  # No extra LLM call for summary — save 1-3s
                 max_worker_tokens=self.worker_max_tokens,
                 complexity=complexity,
             )
@@ -179,7 +179,7 @@ class PairRouter:
                     confidence=0.75,
                     needs_worker=True,
                     model_key="default",
-                    context_compression="summary",
+                    context_compression="recent",  # No extra LLM call for summary
                     max_worker_tokens=self.worker_max_tokens,
                     complexity="moderate",
                 )
@@ -212,7 +212,7 @@ class PairRouter:
                     confidence=0.65,
                     needs_worker=True,
                     model_key="default",
-                    context_compression="summary",
+                    context_compression="recent",  # No extra LLM call for summary
                     max_worker_tokens=min(self.worker_max_tokens, 2048),
                     complexity="moderate",
                 )
@@ -232,7 +232,7 @@ class PairRouter:
             confidence=0.7,
             needs_worker=True,
             model_key="default",
-            context_compression="summary",
+            context_compression="recent",  # No extra LLM call for summary
             max_worker_tokens=self.worker_max_tokens,
             complexity="moderate",
         )

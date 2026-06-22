@@ -189,9 +189,14 @@ class LLMClient:
 
     def chat(self, messages: list[Message], model_key: str = "default",
              temperature: float = None, max_tokens: int = None,
-             stream: bool = False, _fallback_depth: int = 0) -> LLMResponse:
+             stream: bool = False, on_token=None, _fallback_depth: int = 0) -> LLMResponse:
         """
         Synchronous chat completion with retry and fallback.
+        Supports streaming via on_token callback for real-time token delivery.
+
+        When on_token is provided, streams tokens as they arrive and returns
+        the complete response at the end. This eliminates the 3-15s wait for
+        full completion before the user sees anything.
 
         Retry flow:
         1. Try primary model with exponential backoff (up to max_retries)
@@ -205,10 +210,13 @@ class LLMClient:
         temp = temperature if temperature is not None else model_cfg.temperature
         max_tok = max_tokens if max_tokens is not None else model_cfg.max_tokens
 
+        # Use streaming when on_token callback is provided, or when stream=True
+        use_streaming = stream or (on_token is not None)
+
         payload = {
             "model": model_name,
             "messages": [m.to_dict() for m in messages],
-            "stream": stream,
+            "stream": use_streaming,
             "options": {
                 "temperature": temp,
                 "num_predict": max_tok,
@@ -227,32 +235,85 @@ class LLMClient:
                     # Longer timeout for retries
                     attempt_timeout = (self.connect_timeout, self.read_timeout + attempt * 15)
 
-                resp = requests.post(
-                    self._get_url(use_local=(model_key == "fallback_local")),
-                    json=payload,
-                    headers=self._headers(),
-                    timeout=attempt_timeout,
-                )
-                resp.raise_for_status()
+                url = self._get_url(use_local=(model_key == "fallback_local"))
 
-                data = resp.json()
-                content = data.get("message", {}).get("content", "")
-                tokens_in = data.get("prompt_eval_count", 0)
-                tokens_out = data.get("eval_count", 0)
-                elapsed = time.time() - start
+                if use_streaming:
+                    # Streaming path: read tokens as they arrive
+                    full_content = []
+                    tokens_in = 0
+                    tokens_out = 0
 
-                self._call_count += 1
-                self._total_tokens += tokens_in + tokens_out
-                self._total_time += elapsed
+                    resp = requests.post(
+                        url,
+                        json=payload,
+                        headers=self._headers(),
+                        timeout=attempt_timeout,
+                        stream=True,  # requests-level streaming
+                    )
+                    resp.raise_for_status()
 
-                return LLMResponse(
-                    content=content,
-                    model=model_name,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    elapsed=elapsed,
-                    success=True,
-                )
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if not line or not line.startswith("data:"):
+                            continue
+                        line = line[5:]  # strip "data:" prefix
+                        try:
+                            data = json.loads(line)
+                            if data.get("done"):
+                                tokens_in = data.get("prompt_eval_count", 0)
+                                tokens_out = data.get("eval_count", 0)
+                                break
+                            token = data.get("message", {}).get("content", "")
+                            if token:
+                                full_content.append(token)
+                                if on_token:
+                                    on_token(token)
+                        except json.JSONDecodeError:
+                            continue
+
+                    content = "".join(full_content)
+                    elapsed = time.time() - start
+
+                    self._call_count += 1
+                    self._total_tokens += tokens_in + tokens_out
+                    self._total_time += elapsed
+
+                    return LLMResponse(
+                        content=content,
+                        model=model_name,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        elapsed=elapsed,
+                        success=True,
+                    )
+
+                else:
+                    # Non-streaming path (original behavior)
+                    resp = requests.post(
+                        url,
+                        json=payload,
+                        headers=self._headers(),
+                        timeout=attempt_timeout,
+                    )
+                    resp.raise_for_status()
+
+                    data = resp.json()
+                    content = data.get("message", {}).get("content", "")
+                    tokens_in = data.get("prompt_eval_count", 0)
+                    tokens_out = data.get("eval_count", 0)
+                    elapsed = time.time() - start
+
+                    self._call_count += 1
+                    self._total_tokens += tokens_in + tokens_out
+                    self._total_time += elapsed
+
+                    return LLMResponse(
+                        content=content,
+                        model=model_name,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        elapsed=elapsed,
+                        success=True,
+                    )
 
             except requests.exceptions.RequestException as e:
                 last_error = e

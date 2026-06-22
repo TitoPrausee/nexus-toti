@@ -26,6 +26,7 @@ class FeedbackType(Enum):
     AGENT_START = "agent_start"
     AGENT_PROGRESS = "agent_progress"
     AGENT_DONE = "agent_done"
+    STREAM_TOKEN = "stream_token"
 
 
 # Mercury-style icons per tool type
@@ -93,6 +94,8 @@ class FeedbackEmitter:
         self._step = 0
         self._lock = threading.Lock()
         self._done = threading.Event()
+        self._stream_buffer: List[str] = []  # Accumulate streamed tokens
+        self._stream_lock = threading.Lock()
 
     def emit(self, event_type: FeedbackType, message: str,
              detail: str = "", icon: str = "",
@@ -219,3 +222,33 @@ class FeedbackEmitter:
         with self._lock:
             events = self.events[-last_n:] if last_n else self.events
         return "\n".join(e.display for e in events)
+
+    # ─── Streaming ──────────────────────────────────────
+
+    def stream_token(self, token: str):
+        """Receive a streamed token from the LLM and forward it to the async queue.
+        Called from the sync thread (agent.process) — forwards tokens to the
+        Telegram bot for real-time message editing."""
+        with self._stream_lock:
+            self._stream_buffer.append(token)
+
+        if self.async_queue:
+            try:
+                event = FeedbackEvent(
+                    type=FeedbackType.STREAM_TOKEN,
+                    message=token,
+                    icon="",
+                )
+                self.async_queue.put_nowait(event)
+            except Exception:
+                pass
+
+    def get_streamed_text(self) -> str:
+        """Get all streamed tokens accumulated so far (thread-safe)."""
+        with self._stream_lock:
+            return "".join(self._stream_buffer)
+
+    def clear_stream_buffer(self):
+        """Clear the stream buffer (e.g., between iterations)."""
+        with self._stream_lock:
+            self._stream_buffer.clear()

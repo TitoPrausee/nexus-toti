@@ -204,7 +204,8 @@ class NexusAgent:
         self._shown_hints: dict = {}  # user_id -> set of hint IDs
 
     def _build_system_prompt(self, user_id: str = None, platform: str = "telegram") -> str:
-        """Build the full system prompt from soul + tools + user context + personalization."""
+        """Build the full system prompt from soul + tools + user context + personalization.
+        Uses a cached prefix for static parts to reduce per-call overhead."""
         parts = []
 
         # 0. Current date/time — always first so LLM knows the actual date
@@ -248,11 +249,17 @@ class NexusAgent:
             if pers_addition:
                 parts.append(pers_addition)
 
-        # 5. Available tools
-        tool_descs = self._get_tool_descriptions()
+        # 5. Available tools — use cached version if available
+        if not hasattr(self, '_cached_tool_descs'):
+            self._cached_tool_descs = self._get_tool_descriptions()
+        parts.append(self._cached_tool_descs)
 
-        # 6. Available skills (injected as compact overview)
-        skills_summary = self._get_skills_summary()
+        # 6. Available skills — use cached version if available (refresh every 5 min)
+        now_ts = time.time()
+        if not hasattr(self, '_cached_skills') or (now_ts - getattr(self, '_cached_skills_ts', 0)) > 300:
+            self._cached_skills = self._get_skills_summary()
+            self._cached_skills_ts = now_ts
+        parts.append(self._cached_skills)
 
         parts.append(
             f"\n{self._no_meta_rule}\n"
@@ -339,7 +346,7 @@ class NexusAgent:
         # ── 0. Response cache check ──
         # Instant answers for recurring questions (< 10ms, no LLM call)
         cached = self.response_cache.lookup(user_message)
-        if cached and cached.hits >= 2:
+        if cached and cached.hits >= 1:
             elapsed = time.time() - start_time
             log.info(f"Cache HIT for '{user_message[:50]}' ({cached.hits} hits, {elapsed*1000:.0f}ms)")
             if feedback:
@@ -405,6 +412,7 @@ class NexusAgent:
 
         # Track tool calls for auto-skill creation
         _tool_calls_this_turn = []
+        _had_tool_calls = False  # Track whether we've had tool calls (affects streaming)
 
         # ── 5. Think-Act loop (Worker) ──
         final_response = ""
@@ -437,7 +445,15 @@ class NexusAgent:
 
             # Choose model based on routing
             model_key = routing.model_key
-            response = self.llm.chat(messages, model_key=model_key)
+            # Stream tokens to user in real-time for the final answer iteration
+            # (first iteration without prior tool calls, or last iteration after tools)
+            # Don't stream intermediate tool-call responses — only the final answer
+            stream_callback = None
+            if feedback and not _had_tool_calls:
+                def stream_callback(token):
+                    if feedback:
+                        feedback.stream_token(token)
+            response = self.llm.chat(messages, model_key=model_key, on_token=stream_callback)
 
             self._iteration_budget.increment_call()
 

@@ -949,7 +949,7 @@ class NexusTelegramBot:
             except Exception:
                 pass
 
-        emitter = FeedbackEmitter(callback=on_step)
+        emitter = FeedbackEmitter(callback=on_step, async_queue=feedback_queue)
         self._feedback_emitters[user.id] = emitter
 
         # Start the live status consumer task
@@ -1026,16 +1026,52 @@ class NexusTelegramBot:
 
     async def _status_consumer(self, chat_id, ctx, user_id, queue, step_log):
         """Async consumer: reads events from queue and live-edits the status message.
-        Also handles AGENT_START/AGENT_DONE events for per-agent displays."""
+        Also handles AGENT_START/AGENT_DONE events for per-agent displays,
+        and STREAM_TOKEN events for real-time response streaming."""
         last_edit_time = 0
-        MIN_EDIT_INTERVAL = 2.0  # Throttle edits to avoid rate limits (2s = 30/min)
+        MIN_EDIT_INTERVAL = 2.0  # Throttle status edits to avoid rate limits (2s = 30/min)
+        MIN_STREAM_EDIT_INTERVAL = 0.8  # Throttle stream edits (0.8s = 75/min, safe for Telegram)
+        last_stream_edit_time = 0
+        stream_text = ""  # Accumulated streamed text
+        stream_msg_id = None  # Message ID for the streaming response
 
         while True:
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                # Shorter timeout during streaming for more responsive updates
+                timeout = 1.0 if stream_text else 30.0
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
 
                 if event is None:
+                    # Sentinel — processing complete
+                    # If we have streamed text, the final _send_response will handle it
                     break
+
+                # Handle stream tokens — accumulate and live-edit the message
+                if event.type == FeedbackType.STREAM_TOKEN:
+                    stream_text += event.message
+                    now = asyncio.get_event_loop().time()
+                    # Throttle stream edits to avoid Telegram rate limits
+                    if now - last_stream_edit_time >= MIN_STREAM_EDIT_INTERVAL and len(stream_text) > 20:
+                        try:
+                            # Escape for MarkdownV2
+                            display_text = stream_text[:3000]  # Limit for editing
+                            # Don't use MarkdownV2 for streaming — plain text to avoid parse errors
+                            if stream_msg_id:
+                                await ctx.bot.edit_message_text(
+                                    chat_id=chat_id,
+                                    message_id=stream_msg_id,
+                                    text=display_text + "▌",
+                                )
+                            else:
+                                msg = await ctx.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=display_text + "▌",
+                                )
+                                stream_msg_id = msg.message_id
+                            last_stream_edit_time = now
+                        except Exception as e:
+                            log.debug(f"Stream edit error: {e}")
+                    continue
 
                 # Handle agent events — create/update per-agent messages
                 if event.type in (FeedbackType.AGENT_START, FeedbackType.AGENT_DONE,
@@ -1051,6 +1087,19 @@ class NexusTelegramBot:
                 last_edit_time = now
 
             except asyncio.TimeoutError:
+                # During streaming, check if we need to flush remaining text
+                if stream_text and asyncio.get_event_loop().time() - last_stream_edit_time >= MIN_STREAM_EDIT_INTERVAL:
+                    try:
+                        display_text = stream_text[:3000]
+                        if stream_msg_id:
+                            await ctx.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=stream_msg_id,
+                                text=display_text + "▌",
+                            )
+                        last_stream_edit_time = asyncio.get_event_loop().time()
+                    except Exception:
+                        pass
                 continue
             except Exception as e:
                 log.debug(f"Status consumer error: {e}")
