@@ -336,6 +336,8 @@ cron:
   enabled: true
   max_parallel_jobs: 3
 
+prefill_messages_file: /opt/data/prefill.yaml
+
 logging:
   level: INFO
   dir: /opt/data/logs
@@ -404,6 +406,18 @@ SOUL
 USER
         fi
 
+
+        # prefill.yaml anlegen (überschreibt Hermes-Identität)
+        if [ ! -f "$NEXUS_DATA_DIR/prefill.yaml" ]; then
+            cat > "$NEXUS_DATA_DIR/prefill.yaml" << 'PREFILL'
+- role: system
+  content: |
+    Du bist Nexus — ein autonomer KI-Agent mit Atlas Git Memory.
+    Du läufst auf keiner spezifischen Plattform, du bist ein eigenständiger Agent.
+    Deine Identität ist Nexus, nicht Hermes oder ein anderer Agent.
+    Du antwortest direkt, präzise und ohne Smalltalk.
+PREFILL
+        fi
         # Git-Memory initialisieren (frisch, leer)
         cd "$NEXUS_DATA_DIR/memory/git"
         if [ ! -d ".git" ]; then
