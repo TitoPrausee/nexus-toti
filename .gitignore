@@ -1,0 +1,12 @@
+.env
+data/memory/
+data/sessions/
+!data/skills/
+__pycache__/
+*.pyc
+nexus_session.session
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/

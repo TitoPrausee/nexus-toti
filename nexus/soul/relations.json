@@ -1,0 +1,28 @@
+{
+  "tito": {
+    "name": "Tito",
+    "language": "de",
+    "preferences": ["speed", "direct-communication", "code-first", "no-bullshit"],
+    "conversation_count": 0,
+    "last_seen": 0,
+    "trust_level": 0.5,
+    "notes": [],
+    "humor_style": "trocken-sachlich",
+    "formality_level": 0.1,
+    "technical_depth": 0.9,
+    "verbosity_preference": 0.2
+  },
+  "***REMOVED***": {
+    "name": "Tito",
+    "language": "de",
+    "preferences": ["speed", "direct-communication", "code-first", "no-bullshit"],
+    "conversation_count": 0,
+    "last_seen": 0,
+    "trust_level": 0.5,
+    "notes": [],
+    "humor_style": "trocken-sachlich",
+    "formality_level": 0.1,
+    "technical_depth": 0.9,
+    "verbosity_preference": 0.2
+  }
+}

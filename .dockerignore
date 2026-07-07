@@ -1,0 +1,78 @@
+# NEXUS v9 — Docker Ignore
+# Exclude everything not needed for the runtime image
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test artifacts
+.pytest_cache
+tests/
+coverage/
+htmlcov/
+.coverage
+.noseids
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.secret
+
+# Docker files (no recursion)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data directories (mounted via volumes at runtime)
+data/sessions/
+data/memory/embeddings.npy
+data/memory/embeddings_index.json
+
+# Documentation (not needed in container)
+ROADMAP.md
+LICENSE
+*.md
+!README.md
+!data/skills/**/*.md
+
+# Logs
+*.log
+
+# Large model files (if any)
+*.bin
+*.gguf
+*.pt
+*.onnx
+
+# Temporary files
+*.tmp
+*.bak
+*.orig

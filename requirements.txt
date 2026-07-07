@@ -1,0 +1,22 @@
+# NEXUS v9 — Dependencies
+# Lean, clean, no bloat
+
+# Core
+pyyaml>=6.0
+requests>=2.31
+aiohttp>=3.9
+python-dotenv>=1.0
+
+# Telegram
+python-telegram-bot>=21.0
+telethon>=1.34
+
+# Discord (contributor onboarding bot)
+discord.py>=2.3
+
+# Web search (optional — fallback uses requests)
+duckduckgo-search>=4.0
+
+# Vector search for L3 memory (semantic similarity)
+sentence-transformers>=2.2
+numpy>=1.24

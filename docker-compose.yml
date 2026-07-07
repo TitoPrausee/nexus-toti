@@ -1,0 +1,36 @@
+services:
+  nexus:
+    image: hermes-agent-sudo:latest
+    container_name: nexus
+    ports:
+      - "8690:8642"
+    volumes:
+      - ~/.nexus:/opt/data
+    env_file:
+      - ~/.nexus/.env
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11435
+      - OLLAMA_MODEL=glm-5.2:cloud
+      - NEXUS_LOG_LEVEL=INFO
+      - NEXUS_DATA_DIR=/opt/data
+      - API_SERVER_KEY=fdc43a344ca36e1520c3d4eb02e5e18a4fef0ee6c2887fd7151557db357d4ed2
+    command: gateway run
+    stdin_open: true
+    tty: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4.0"
+        reservations:
+          memory: 4G
+          cpus: "2.0"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8642/health > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
